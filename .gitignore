@@ -210,3 +210,6 @@ __marimo__/
 #saved logits
 saved_logits/*/*
 *.npz
+
+#don't save models on github
+*.bin
