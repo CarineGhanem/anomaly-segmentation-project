@@ -74,7 +74,7 @@ def main():
 
     # loop through images
     for path in glob.glob(args.input):
-
+        
         img = Image.open(path).convert("RGB")
         inputs = processor(images=img, return_tensors="pt").to(device)
 
@@ -95,8 +95,11 @@ def main():
            pathGT = pathGT.replace("jpg", "png")                
         if "RoadAnomaly" in pathGT:
            pathGT = pathGT.replace("jpg", "png") 
-
-        filename = pathGT.replace(".png", "")
+           
+        filename = os.path.basename(path)\
+                                        .replace(".png", "")\
+                                        .replace(".jpg", "")\
+                                        .replace(".webp", "")
         print(f"Processing {filename}")
 
         mask_gt = Image.open(pathGT)
