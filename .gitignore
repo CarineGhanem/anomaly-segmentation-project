@@ -213,3 +213,6 @@ saved_logits/*/*
 
 #don't save models on github
 *.bin
+
+#wandb files
+wandb/
