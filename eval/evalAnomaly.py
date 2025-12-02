@@ -62,9 +62,35 @@ def main():
     anomaly_score_list = []
     ood_gts_list = []
 
-    if not os.path.exists('results.txt'):
-        open('results.txt', 'w').close()
-    file = open('results.txt', 'a')
+    # Extract dataset and method names for result identification
+    input_path = str(args.input[0])
+    dataset_name = "Unknown"
+    if "RoadAnomaly21" in input_path:
+        dataset_name = "RoadAnomaly21"
+    elif "RoadObsticle21" in input_path:
+        dataset_name = "RoadObsticle21"
+    elif "FS_LostFound_full" in input_path or "LostFound" in input_path:
+        dataset_name = "FS_LostFound_full"
+    elif "fs_static" in input_path:
+        dataset_name = "fs_static"
+    elif "RoadAnomaly" in input_path and "RoadAnomaly21" not in input_path:
+        dataset_name = "RoadAnomaly"
+    method_name = args.anomaly_score
+
+    # Remove old result for same dataset+method if exists
+    results_file = 'results.txt'
+    if os.path.exists(results_file):
+        with open(results_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        with open(results_file, 'w', encoding='utf-8') as f:
+            for line in lines:
+                exact_dataset_match = f'Dataset: {dataset_name} |' in line
+                method_match = f'Method: {method_name}' in line
+                # Keep line if it doesn't match current dataset+method exactly
+                if not (exact_dataset_match and method_match):
+                    f.write(line)
+
+    file = open(results_file, 'a')
 
     modelpath = args.loadDir + args.loadModel
     weightspath = args.loadDir + args.loadWeights
@@ -179,8 +205,11 @@ def main():
     print(f'AUPRC score: {prc_auc*100.0}')
     print(f'FPR@TPR95: {fpr*100.0}')
 
-    file.write(('    AUPRC score:' + str(prc_auc*100.0) + '   FPR@TPR95:' + str(fpr*100.0) ))
+    # Write result with dataset and method identifier
+    result_line = f'Dataset: {dataset_name} | Method: {method_name} | AUPRC: {prc_auc*100.0:.2f} | FPR@TPR95: {fpr*100.0:.2f}\n'
+    file.write(result_line)
     file.close()
+    print(f"Result saved: {result_line.strip()}")
 
 if __name__ == '__main__':
     main()
