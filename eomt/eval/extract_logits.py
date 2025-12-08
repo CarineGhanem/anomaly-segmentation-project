@@ -132,11 +132,12 @@ def eomt_forward_logits(model, img_tensor, device):
         mask_logits = F.interpolate(
             mask_logits_layers[-1], size=(H, W), mode="bilinear", align_corners=False
         )
+        class_logits = class_logits_layers[-1]
 
         per_pixel = model.to_per_pixel_logits_semantic(mask_logits, class_logits_layers[-1])
         stitched = model.revert_window_logits_semantic(per_pixel, origins, img_sizes)
 
-    return stitched[0]  # [C, H, W]
+    return stitched[0], mask_logits, class_logits  # [C, H, W]
 
 
 # ============================================================
@@ -192,8 +193,10 @@ def main():
         img = input_tf(Image.open(path).convert("RGB")).to(device)
 
         # --- Forward pass → pixel logits ---
-        logits = eomt_forward_logits(model, img, device)
-        logits_np = logits.cpu().numpy()
+        pixel_logits, mask_logits, class_logits = eomt_forward_logits(model, img, device)
+        logits_np = pixel_logits.cpu().numpy()
+        mask_np_logits = mask_logits.cpu().numpy()
+        class_np_logits = class_logits.cpu().numpy()
 
         # --- Load + remap GT mask ---
         pathGT = path.replace("images", "labels_masks") \
@@ -205,7 +208,7 @@ def main():
 
         # --- Save .npz ---
         save_path = os.path.join(out_dir, fname + ".npz")
-        np.savez_compressed(save_path, pixel_logits=logits_np, mask_gt=mask_np)
+        np.savez_compressed(save_path, pixel_logits=logits_np, mask_logits=mask_np_logits, class_logits=class_np_logits, mask_gt=mask_np)
 
     print("\n✓ All logits saved to:", out_dir)
 

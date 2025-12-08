@@ -12,7 +12,7 @@ from argparse import ArgumentParser
 
 from sklearn.metrics import average_precision_score
 from ood_metrics import fpr_at_95_tpr
-
+from scipy.ndimage import label
 
 # ============================================================
 # Stable softmax for [C,H,W] logits (avoids overflow)
@@ -81,6 +81,107 @@ def evaluate_method(all_scores, all_gts):
     return prc_auc, fpr95
 
 
+def rba_region_scores(mask_logits, class_logits, gt_mask):
+    """
+    mask_logits:  [Q, H, W]
+    class_logits: [Q, C]
+    gt_mask:      [H, W] with 1 = OOD, 0 = ID
+
+    Returns:
+        region_scores: list of region-level scalar scores
+        region_labels: list of 0/1 (1=OOD region, 0=ID region)
+    """
+    Q, H, W = mask_logits.shape
+    _, C = class_logits.shape
+
+    # ---------------------------------------------------------
+    # Compute RbA pixel score:
+    # s(x) = max_j max_i (class_logits[i,j] + mask_logits[i,x])
+    # ---------------------------------------------------------
+
+    # expand mask logits → [Q, H, W] → [Q, H, W, 1]
+    m = mask_logits[..., None]  # Q × H × W × 1
+
+    # expand class logits → [Q, C] → [Q, 1, 1, C]
+    c = class_logits[:, None, None, :]  # Q × 1 × 1 × C
+
+    # score per pixel per class → Q × H × W × C
+    sums = m + c
+
+    # max over queries i
+    max_over_q = np.max(sums, axis=0)  # H × W × C
+
+    # max over classes j
+    rba_score_map = np.max(max_over_q, axis=-1)  # H × W
+
+    # ---------------------------------------------------------
+    # Extract connected components for region-level scoring
+    # ---------------------------------------------------------
+    labeled, num_regions = label(gt_mask == 1)
+
+    region_scores = []
+    region_labels = []
+
+    # Add POSITIVE regions
+    for rid in range(1, num_regions + 1):
+        region = labeled == rid
+        if region.sum() == 0:
+            continue
+        s = rba_score_map[region].max()
+        region_scores.append(s)
+        region_labels.append(1)
+
+    # Add a NEGATIVE region (all ID pixels)
+    id_region = (gt_mask == 0)
+    if id_region.sum() > 0:
+        neg_score = rba_score_map[id_region].max()
+        region_scores.append(neg_score)
+        region_labels.append(0)
+
+    return region_scores, region_labels
+
+def compute_auprc(scores, labels):
+    """
+    scores: list or array of region-level anomaly scores
+    labels: list or array with 1=OOD region, 0=ID region
+    """
+    scores = np.array(scores)
+    labels = np.array(labels)
+    return average_precision_score(labels, scores)
+
+
+def compute_fpr(scores, labels):
+    """
+    scores: anomaly scores (higher = more anomalous)
+    labels: 0/1 ground truth (1 = OOD)
+
+    Returns FPR at 95% TPR
+    """
+
+    scores = np.array(scores)
+    labels = np.array(labels)
+
+    # True positives and negatives
+    pos = scores[labels == 1]
+    neg = scores[labels == 0]
+
+    if len(pos) == 0 or len(neg) == 0:
+        return 1.0  # worst case
+
+    # threshold at 95% recall of positives
+    threshold = np.percentile(pos, 5)  # 5th percentile → retain 95%
+
+    # FP rate
+    fp = np.sum(neg >= threshold)
+    tn = np.sum(neg < threshold)
+
+    if fp + tn == 0:
+        return 1.0
+
+    return fp / (fp + tn)
+
+
+
 # ============================================================
 # MAIN EVALUATION LOOP
 # ============================================================
@@ -101,15 +202,35 @@ def main():
     results = {}
 
     # Evaluate 3 anomaly scoring methods
-    for method in ["msp", "max_logit", "entropy"]:
+    for method in ["rba","msp", "max_logit", "entropy"]:
         print(f"\n=== Evaluating {method} ===")
 
         all_scores, all_gts = [], []
+        region_scores_total, region_labels_total = [], []
 
         for f in files:
             data = np.load(f)
             pixel_logits = data["pixel_logits"]     # [C,H,W]
+            mask_logits = data["mask_logits"]
+            class_logits = data["class_logits"]
+
             gt = data["mask_gt"]                   # [H,W]
+
+            if class_logits.ndim == 3 and class_logits.shape[0] == 1:
+                class_logits = class_logits[0]
+
+            # Case 2: (Q, C, 1)
+            if class_logits.ndim == 3 and class_logits.shape[2] == 1:
+                class_logits = class_logits[:, :, 0]
+
+            # Case 3: wrong shape → print and skip
+            if class_logits.ndim != 2:
+                print("ERROR: invalid class_logits shape:", class_logits.shape, "file:", f)
+                continue
+            if mask_logits.ndim == 4 and mask_logits.shape[0] == 1:
+                mask_logits = mask_logits[0]
+            mask_logits = mask_logits.astype(np.float32)
+            class_logits = class_logits.astype(np.float32)
 
             # Resize logits if GT mask resolution differs
             C, Hm, Wm = pixel_logits.shape
@@ -120,15 +241,35 @@ def main():
                     resized[c] = cv2.resize(pixel_logits[c], (W_gt, H_gt),
                                             interpolation=cv2.INTER_LINEAR)
                 pixel_logits = resized
+            if mask_logits.shape[1:] != gt.shape:
+                Q = mask_logits.shape[0]
+                resized_mask = np.zeros((Q, gt.shape[0], gt.shape[1]), dtype=mask_logits.dtype)
+                for q in range(Q):
+                    resized_mask[q] = cv2.resize(mask_logits[q], (W_gt, H_gt), interpolation=cv2.INTER_LINEAR)
+                mask_logits = resized_mask.astype(np.float32)
 
-            # Compute anomaly map
+
+
+            # Rba
+            if method == "rba":
+                rs, rl = rba_region_scores(mask_logits, class_logits, gt)
+                region_scores_total.extend(rs)
+                region_labels_total.extend(rl)
+                continue
+            # Pixel level anomaly map
             anomaly = anomaly_scores_from_pixel_logits(pixel_logits, method)
 
             all_scores.append(anomaly)
             all_gts.append(gt)
 
         # Compute metrics
-        prc, fpr = evaluate_method(all_scores, all_gts)
+        if method == "rba":
+            prc = compute_auprc(region_scores_total,region_labels_total)
+            fpr = compute_fpr(region_scores_total, region_labels_total)
+
+        else:
+            prc, fpr = evaluate_method(all_scores, all_gts)
+
         results[method] = (prc, fpr)
 
         # -------------------------------------------------------
