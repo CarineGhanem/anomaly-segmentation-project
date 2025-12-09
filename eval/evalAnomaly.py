@@ -90,7 +90,7 @@ def main():
                 if not (exact_dataset_match and method_match):
                     f.write(line)
 
-    file = open(results_file, 'a')
+    file = open(results_file, 'a', encoding='utf-8')
 
     modelpath = args.loadDir + args.loadModel
     weightspath = args.loadDir + args.loadWeights
@@ -124,6 +124,11 @@ def main():
                 own_state[name].copy_(param)
         return model
 
+    # Load model weights
+    try:
+        model = load_my_state_dict(model, torch.load(weightspath, map_location=lambda storage, loc: storage, weights_only=False))
+    except TypeError:
+        # Fallback for older PyTorch versions that don't support weights_only
     model = load_my_state_dict(model, torch.load(weightspath, map_location=lambda storage, loc: storage))
     print ("Model and weights LOADED successfully")
     model.eval()
@@ -154,24 +159,16 @@ def main():
            pathGT = pathGT.replace("webp", "png")
         if "fs_static" in pathGT:
            pathGT = pathGT.replace("jpg", "png")                
-        if "RoadAnomaly" in pathGT:
+        if "RoadAnomaly" in pathGT and "RoadAnomaly21" not in pathGT:
            pathGT = pathGT.replace("jpg", "png")  
 
         mask = Image.open(pathGT)
         mask = target_transform(mask)
         ood_gts = np.array(mask)
 
-        if "RoadAnomaly" in pathGT:
+        # RoadAnomaly (not RoadAnomaly21): convert 2 -> 1
+        if "RoadAnomaly" in pathGT and "RoadAnomaly21" not in pathGT:
             ood_gts = np.where((ood_gts==2), 1, ood_gts)
-        if "LostAndFound" in pathGT:
-            ood_gts = np.where((ood_gts==0), 255, ood_gts)
-            ood_gts = np.where((ood_gts==1), 0, ood_gts)
-            ood_gts = np.where((ood_gts>1)&(ood_gts<201), 1, ood_gts)
-
-        if "Streethazard" in pathGT:
-            ood_gts = np.where((ood_gts==14), 255, ood_gts)
-            ood_gts = np.where((ood_gts<20), 0, ood_gts)
-            ood_gts = np.where((ood_gts==255), 1, ood_gts)
 
         if 1 not in np.unique(ood_gts):
             continue              
@@ -184,6 +181,12 @@ def main():
 
     file.write( "\n")
 
+    # Check if any images were processed
+    if len(ood_gts_list) == 0:
+        print("ERROR: No images with anomaly pixels found!")
+        file.close()
+        return
+
     ood_gts = np.array(ood_gts_list)
     anomaly_scores = np.array(anomaly_score_list)
 
@@ -192,6 +195,17 @@ def main():
 
     ood_out = anomaly_scores[ood_mask]
     ind_out = anomaly_scores[ind_mask]
+
+    # Check if we have both normal and anomaly pixels
+    if len(ood_out) == 0:
+        print("WARNING: No anomaly pixels found in any image!")
+        file.close()
+        return
+    
+    if len(ind_out) == 0:
+        print("WARNING: No normal pixels found in any image!")
+        file.close()
+        return
 
     ood_label = np.ones(len(ood_out))
     ind_label = np.zeros(len(ind_out))
