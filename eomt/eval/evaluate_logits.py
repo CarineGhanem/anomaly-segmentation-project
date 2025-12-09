@@ -81,39 +81,43 @@ def evaluate_method(all_scores, all_gts):
     return prc_auc, fpr95
 
 
-def rba_region_scores(mask_logits, class_logits, gt_mask):
-    """
-    mask_logits:  [Q, H, W]
-    class_logits: [Q, C]
-    gt_mask:      [H, W] with 1 = OOD, 0 = ID
+def rba_pixel_scores(mask_logits, class_logits):
+    # mask_logits: [Q, H, W]
+    # class_logits: [Q, C]
 
+    Q, H, W = mask_logits.shape
+    Q2, C = class_logits.shape
+    assert Q == Q2
+
+    # (1) class logits per query e classe: [Q, C] -> broadcast to [Q, C, H, W] on the fly
+    # (2) mask logits: [Q, H, W] -> expand to [Q, 1, H, W]
+    # But DON'T create the full tensor. Do logsumexp manually:
+
+    # max over queries
+    max_q = np.max(class_logits[:, :, None, None] + mask_logits[:, None, :, :], axis=0)
+
+    # compute exp(...) using stability trick, but in chunks to avoid memory explosion
+    L = np.zeros((C, H, W), dtype=np.float32)
+
+    for k in range(C):
+        # logits for class k across Q queries
+        vals = class_logits[:, k, None, None] + mask_logits      # [Q, H, W]
+
+        max_k = np.max(vals, axis=0)                             # [H, W]
+        L[k] = max_k + np.log(np.sum(np.exp(vals - max_k), axis=0))
+
+    # (3) RbA(x) = - sum_k tanh(L_k(x))
+    return -np.tanh(L).sum(axis=0)
+
+
+def rba_region_scores(rba_map, gt_mask):
+    """
+    rba_map: [H, W] with RbA pixel scores
+    gt_mask: [H, W] with 1 = OOD, 0 = ID
     Returns:
         region_scores: list of region-level scalar scores
         region_labels: list of 0/1 (1=OOD region, 0=ID region)
     """
-    Q, H, W = mask_logits.shape
-    _, C = class_logits.shape
-
-    # ---------------------------------------------------------
-    # Compute RbA pixel score:
-    # s(x) = max_j max_i (class_logits[i,j] + mask_logits[i,x])
-    # ---------------------------------------------------------
-
-    # expand mask logits → [Q, H, W] → [Q, H, W, 1]
-    m = mask_logits[..., None]  # Q × H × W × 1
-
-    # expand class logits → [Q, C] → [Q, 1, 1, C]
-    c = class_logits[:, None, None, :]  # Q × 1 × 1 × C
-
-    # score per pixel per class → Q × H × W × C
-    sums = m + c
-
-    # max over queries i
-    max_over_q = np.max(sums, axis=0)  # H × W × C
-
-    # max over classes j
-    rba_score_map = np.max(max_over_q, axis=-1)  # H × W
-
     # ---------------------------------------------------------
     # Extract connected components for region-level scoring
     # ---------------------------------------------------------
@@ -127,14 +131,14 @@ def rba_region_scores(mask_logits, class_logits, gt_mask):
         region = labeled == rid
         if region.sum() == 0:
             continue
-        s = rba_score_map[region].max()
+        s = rba_map[region].max()
         region_scores.append(s)
         region_labels.append(1)
 
     # Add a NEGATIVE region (all ID pixels)
     id_region = (gt_mask == 0)
     if id_region.sum() > 0:
-        neg_score = rba_score_map[id_region].max()
+        neg_score = rba_map[id_region].max()
         region_scores.append(neg_score)
         region_labels.append(0)
 
@@ -252,7 +256,8 @@ def main():
 
             # Rba
             if method == "rba":
-                rs, rl = rba_region_scores(mask_logits, class_logits, gt)
+                rba_map = rba_pixel_scores(mask_logits, class_logits)   
+                rs, rl = rba_region_scores(rba_map, gt)
                 region_scores_total.extend(rs)
                 region_labels_total.extend(rl)
                 continue
@@ -264,8 +269,8 @@ def main():
 
         # Compute metrics
         if method == "rba":
-            prc = compute_auprc(region_scores_total,region_labels_total)
-            fpr = compute_fpr(region_scores_total, region_labels_total)
+            prc = average_precision_score(region_labels_total, region_scores_total)
+            fpr = fpr_at_95_tpr(region_scores_total, region_labels_total)
 
         else:
             prc, fpr = evaluate_method(all_scores, all_gts)
