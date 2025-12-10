@@ -29,7 +29,7 @@ seed = 42
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
-torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = True
 
 # Get the root directory of your project (adjust if needed) 
@@ -194,10 +194,13 @@ def main():
 
         # --- Forward pass → pixel logits ---
         pixel_logits, mask_logits, class_logits = eomt_forward_logits(model, img, device)
-        logits_np = pixel_logits.cpu().numpy()
-        mask_np_logits = mask_logits.cpu().numpy()
-        class_np_logits = class_logits.cpu().numpy()
+        pixel_logits = pixel_logits.detach().to(dtype=torch.float16)
+        mask_logits  = mask_logits.detach().to(dtype=torch.float16)
+        class_logits = class_logits.detach().to(dtype=torch.float16)
 
+        logits_np       = pixel_logits.cpu().numpy()
+        mask_np_logits  = mask_logits.cpu().numpy()
+        class_np_logits = class_logits.cpu().numpy()
         # --- Load + remap GT mask ---
         pathGT = path.replace("images", "labels_masks") \
                      .replace(".jpg", ".png") \
@@ -208,7 +211,7 @@ def main():
 
         # --- Save .npz ---
         save_path = os.path.join(out_dir, fname + ".npz")
-        np.savez_compressed(save_path, pixel_logits=logits_np, mask_logits=mask_np_logits, class_logits=class_np_logits, mask_gt=mask_np)
+        np.savez(save_path, pixel_logits=logits_np, mask_logits=mask_np_logits, class_logits=class_np_logits, mask_gt=mask_np)
 
     print("\n✓ All logits saved to:", out_dir)
 

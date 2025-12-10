@@ -89,25 +89,18 @@ def rba_pixel_scores(mask_logits, class_logits):
     Q2, C = class_logits.shape
     assert Q == Q2
 
-    # (1) class logits per query e classe: [Q, C] -> broadcast to [Q, C, H, W] on the fly
-    # (2) mask logits: [Q, H, W] -> expand to [Q, 1, H, W]
-    # But DON'T create the full tensor. Do logsumexp manually:
-
-    # max over queries
-    max_q = np.max(class_logits[:, :, None, None] + mask_logits[:, None, :, :], axis=0)
-
-    # compute exp(...) using stability trick, but in chunks to avoid memory explosion
     L = np.zeros((C, H, W), dtype=np.float32)
 
+    # Loop SOLO sulle classi (C ~ 19 → veloce)
     for k in range(C):
-        # logits for class k across Q queries
-        vals = class_logits[:, k, None, None] + mask_logits      # [Q, H, W]
+        # [Q,H,W] = broadcast su una sola classe alla volta (RAM-safe)
+        vals = class_logits[:, k, None, None] + mask_logits
 
-        max_k = np.max(vals, axis=0)                             # [H, W]
+        max_k = np.max(vals, axis=0)
         L[k] = max_k + np.log(np.sum(np.exp(vals - max_k), axis=0))
 
-    # (3) RbA(x) = - sum_k tanh(L_k(x))
-    return -np.tanh(L).sum(axis=0)
+    return np.tanh(L).sum(axis=0)
+
 
 
 def rba_region_scores(rba_map, gt_mask):
@@ -121,6 +114,7 @@ def rba_region_scores(rba_map, gt_mask):
     # ---------------------------------------------------------
     # Extract connected components for region-level scoring
     # ---------------------------------------------------------
+    print("Rba computation...")
     labeled, num_regions = label(gt_mask == 1)
 
     region_scores = []
@@ -136,53 +130,18 @@ def rba_region_scores(rba_map, gt_mask):
         region_labels.append(1)
 
     # Add a NEGATIVE region (all ID pixels)
-    id_region = (gt_mask == 0)
-    if id_region.sum() > 0:
-        neg_score = rba_map[id_region].max()
-        region_scores.append(neg_score)
+    # Sample multiple negative ID regions
+    id_labeled, num_id_regions = label(gt_mask == 0)
+
+    for rid in range(1, num_id_regions + 1):
+        region = id_labeled == rid
+        if region.sum() == 0:
+            continue
+        s = rba_map[region].max()
+        region_scores.append(s)
         region_labels.append(0)
 
     return region_scores, region_labels
-
-def compute_auprc(scores, labels):
-    """
-    scores: list or array of region-level anomaly scores
-    labels: list or array with 1=OOD region, 0=ID region
-    """
-    scores = np.array(scores)
-    labels = np.array(labels)
-    return average_precision_score(labels, scores)
-
-
-def compute_fpr(scores, labels):
-    """
-    scores: anomaly scores (higher = more anomalous)
-    labels: 0/1 ground truth (1 = OOD)
-
-    Returns FPR at 95% TPR
-    """
-
-    scores = np.array(scores)
-    labels = np.array(labels)
-
-    # True positives and negatives
-    pos = scores[labels == 1]
-    neg = scores[labels == 0]
-
-    if len(pos) == 0 or len(neg) == 0:
-        return 1.0  # worst case
-
-    # threshold at 95% recall of positives
-    threshold = np.percentile(pos, 5)  # 5th percentile → retain 95%
-
-    # FP rate
-    fp = np.sum(neg >= threshold)
-    tn = np.sum(neg < threshold)
-
-    if fp + tn == 0:
-        return 1.0
-
-    return fp / (fp + tn)
 
 
 
@@ -214,9 +173,9 @@ def main():
 
         for f in files:
             data = np.load(f)
-            pixel_logits = data["pixel_logits"]     # [C,H,W]
-            mask_logits = data["mask_logits"]
-            class_logits = data["class_logits"]
+            pixel_logits = data["pixel_logits"].astype(np.float32, copy=False)    # [C,H,W]
+            mask_logits = data["mask_logits"].astype(np.float32, copy=False)
+            class_logits = data["class_logits"].astype(np.float32, copy=False)
 
             gt = data["mask_gt"]                   # [H,W]
 
@@ -233,26 +192,21 @@ def main():
                 continue
             if mask_logits.ndim == 4 and mask_logits.shape[0] == 1:
                 mask_logits = mask_logits[0]
-            mask_logits = mask_logits.astype(np.float32)
-            class_logits = class_logits.astype(np.float32)
 
             # Resize logits if GT mask resolution differs
             C, Hm, Wm = pixel_logits.shape
             H_gt, W_gt = gt.shape
             if (Hm, Wm) != (H_gt, W_gt):
-                resized = np.zeros((C, H_gt, W_gt), dtype=pixel_logits.dtype)
-                for c in range(C):
-                    resized[c] = cv2.resize(pixel_logits[c], (W_gt, H_gt),
-                                            interpolation=cv2.INTER_LINEAR)
-                pixel_logits = resized
+                pixel_logits = np.stack([
+                    cv2.resize(pixel_logits[c], (W_gt, H_gt), interpolation=cv2.INTER_LINEAR)
+                    for c in range(C)
+                ]).astype(np.float32)
+
             if mask_logits.shape[1:] != gt.shape:
-                Q = mask_logits.shape[0]
-                resized_mask = np.zeros((Q, gt.shape[0], gt.shape[1]), dtype=mask_logits.dtype)
-                for q in range(Q):
-                    resized_mask[q] = cv2.resize(mask_logits[q], (W_gt, H_gt), interpolation=cv2.INTER_LINEAR)
-                mask_logits = resized_mask.astype(np.float32)
-
-
+                mask_logits = np.stack([
+                    cv2.resize(mask_logits[q], (W_gt, H_gt), interpolation=cv2.INTER_LINEAR)
+                    for q in range(mask_logits.shape[0])
+                ]).astype(np.float32)
 
             # Rba
             if method == "rba":
