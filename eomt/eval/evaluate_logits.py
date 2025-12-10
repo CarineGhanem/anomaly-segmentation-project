@@ -116,11 +116,23 @@ def main():
             pixel_logits = data["pixel_logits"]  # [C,H,W]
             gt = data["mask_gt"]                # [H,W]
 
+            # Ensure GT mask is uint8 and has correct values
+            if gt.dtype != np.uint8:
+                gt = gt.astype(np.uint8)
+            
+            # Check for invalid values in GT mask
+            invalid_values = np.setdiff1d(np.unique(gt), [0, 1, 255])
+            if len(invalid_values) > 0:
+                print(f"WARNING: Invalid values in GT mask {os.path.basename(f)}: {invalid_values}")
+                # Clip invalid values to valid range
+                gt = np.clip(gt, 0, 255)
+                gt = np.where(np.isin(gt, [0, 1, 255]), gt, 255)  # Set invalid to ignore
+
             # resize logits to GT shape if needed
             C, Hm, Wm = pixel_logits.shape
             H_gt, W_gt = gt.shape
             if (Hm, Wm) != (H_gt, W_gt):
-                resized_logits = np.zeros((C, H_gt, W_gt))
+                resized_logits = np.zeros((C, H_gt, W_gt), dtype=pixel_logits.dtype)
                 for c in range(C):
                     resized_logits[c] = cv2.resize(pixel_logits[c],
                                                    (W_gt, H_gt),

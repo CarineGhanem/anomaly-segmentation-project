@@ -54,19 +54,36 @@ sys.path.append(project_root)
 
 # ============================================================
 # Helper: Dataset-specific GT mask remapping
-# Converts dataset labels → binary OOD mask {0 in-distribution, 1 anomaly}
+# Converts dataset labels → binary OOD mask {0 in-distribution, 1 anomaly, 255 ignore}
 # ============================================================
 def remap_gt_mask(mask, pathGT):
-    if "RoadAnomaly" in pathGT:
-        mask = np.where(mask == 2, 1, mask)
-    elif "LostAndFound" in pathGT:
-        mask = np.where(mask == 0, 255, mask)
-        mask = np.where(mask == 1, 0, mask)
-        mask = np.where((mask > 1) & (mask < 201), 1, mask)
-    elif "Streethazard" in pathGT:
-        mask = np.where(mask == 14, 255, mask)
-        mask = np.where(mask < 20, 0, mask)
-        mask = np.where(mask == 255, 1, mask)
+    """
+    Remap dataset-specific labels to standard OOD mask format:
+    - 0: in-distribution (normal)
+    - 1: anomaly (out-of-distribution)
+    - 255: ignore (background/void)
+    """
+    if "RoadAnomaly" in pathGT and "RoadAnomaly21" not in pathGT:
+        # RoadAnomaly: 0=road, 1=background, 2=anomaly
+        # Convert: 0,1 -> 0 (normal), 2 -> 1 (anomaly)
+        mask = np.where(mask == 2, 1, 0)  # 2 -> 1, others -> 0
+    elif "RoadAnomaly21" in pathGT or "RoadObsticle21" in pathGT:
+        # RoadAnomaly21/RoadObsticle21 format: 0=normal, 1=anomaly, 255=ignore
+        # Already in standard format, no remapping needed!
+        pass  # No remapping needed - already in correct format
+    elif "LostAndFound" in pathGT or "FS_LostFound" in pathGT:
+        # FS_LostFound_full format: 0=normal, 1=anomaly, 255=ignore
+        # Already in standard format, no remapping needed!
+        # (Some LostAndFound versions use 0=void, 1=road, >1=anomaly, but FS_LostFound_full uses standard format)
+        pass  # No remapping needed - already in correct format
+    elif "fs_static" in pathGT:
+        # fs_static format: 0=normal, 1=anomaly, 255=ignore
+        # Already in standard format, no remapping needed!
+        pass  # No remapping needed - already in correct format
+    else:
+        # If no match, print warning but don't modify mask
+        print(f"WARNING: Unknown dataset in path {pathGT}, mask not remapped!")
+    
     return mask
 
 
@@ -214,6 +231,11 @@ def main():
         pathGT = path.replace("images", "labels_masks") \
                      .replace(".jpg", ".png") \
                      .replace(".webp", ".png")
+
+        # Check if GT file exists
+        if not os.path.exists(pathGT):
+            print(f"WARNING: GT file not found: {pathGT}, skipping...")
+            continue
 
         gt = target_tf(Image.open(pathGT))
         mask_np = remap_gt_mask(np.array(gt), pathGT)
