@@ -133,15 +133,38 @@ def build_eomt_model(config, ckpt_path, device):
         **model_kwargs,
     ).to(device).eval()
 
-    # --- Drop class_head + criterion weights ---
-    for k in list(state_dict.keys()):
-        if any(x in k for x in ["class_head", "criterion", "empty_weight"]):
-            del state_dict[k]
+    # Check if model has correct num_classes, if not, replace class_head
+    actual_num_classes = model.network.class_head.weight.shape[0]
+    if actual_num_classes != num_classes:
+        print(f"WARNING: Model has {actual_num_classes} classes but checkpoint has {num_classes} classes")
+        print("Replacing class_head to match checkpoint...")
+        
+        # Replace class_head to match checkpoint
+        import torch.nn as nn
+        hidden_dim = model.network.class_head.weight.shape[1]
+        model.network.class_head = nn.Linear(hidden_dim, num_classes).to(device)
+        
+        # Replace criterion.empty_weight if it exists
+        if hasattr(model, 'criterion') and hasattr(model.criterion, 'empty_weight'):
+            model.criterion.empty_weight = torch.ones(num_classes, device=device)
+    
+    # Filter state_dict to only include keys that match model structure
+    # IMPORTANT: We need to keep class_head weights for correct class_logits generation!
+    model_state = model.state_dict()
+    filtered_state_dict = {}
+    for k, v in state_dict.items():
+        if k in model_state:
+            if model_state[k].shape == v.shape:
+                filtered_state_dict[k] = v
+            else:
+                print(f"Skipping {k}: shape mismatch (model: {model_state[k].shape}, checkpoint: {v.shape})")
+        else:
+            print(f"Skipping {k}: not in model")
+    
+    # Load filtered weights (including class_head!)
+    model.load_state_dict(filtered_state_dict, strict=False)
 
-    # --- Load remaining weights ---
-    model.load_state_dict(state_dict, strict=False)
-
-    print("EoMT model ready | img_size:", img_size, "\n")
+    print("EoMT model ready | img_size:", img_size, "| num_classes:", num_classes, "\n")
     return model, img_size
 
 
