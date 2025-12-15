@@ -205,24 +205,3 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-
-
-#saved logits
-saved_logits/*/*
-*.npz
-
-#don't save models on github
-*.bin
-
-#wandb files
-wandb/
-
-#dataset images
-Validation_Dataset/
-*.png
-*.jpg
-*.jpeg
-*.webp
-
-#saved logits archives
-*.zip
