@@ -223,3 +223,6 @@ Validation_Dataset/
 *.jpg
 *.jpeg
 *.webp
+
+#saved logits archives
+*.zip
