@@ -40,7 +40,7 @@ from huggingface_hub import hf_hub_download
 # ============================================================
 # Reproducibility
 # ============================================================
-seed = 42
+seed = 52
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
@@ -202,9 +202,12 @@ def main():
     parser.add_argument("--input", type=str,
                         default="../../Validation_Dataset/RoadAnomaly21/images/*.png")
     parser.add_argument("--config", type=str,
-                        default="../configs/dinov2/cityscapes/semantic/eomt_large_1024.yaml")
+                        default="../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml",
+                        help="Path to YAML config file. Default: eomt_base_640.yaml")
     parser.add_argument("--save_dir", type=str, default="./saved_logits")
     parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--ckpt_path", type=str, default=None,
+                        help="Local path to checkpoint file (if not on HuggingFace). If not provided, will try to download from HuggingFace.")
     args = parser.parse_args()
 
     # --- Select device ---
@@ -220,9 +223,25 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    # --- Resolve HF checkpoint ---
-    model_name = config["trainer"]["logger"]["init_args"]["name"]
-    ckpt_path = hf_hub_download(f"tue-mps/{model_name}", "pytorch_model.bin")
+    # --- Resolve checkpoint path ---
+    if args.ckpt_path:
+        # Use local checkpoint file
+        ckpt_path = args.ckpt_path
+        if not os.path.exists(ckpt_path):
+            print(f"ERROR: Checkpoint file not found: {ckpt_path}")
+            return
+        print(f"Using local checkpoint: {ckpt_path}")
+    else:
+        # Try to download from HuggingFace
+        try:
+            model_name = config["trainer"]["logger"]["init_args"]["name"]
+            ckpt_path = hf_hub_download(f"tue-mps/{model_name}", "pytorch_model.bin")
+            print(f"Downloaded checkpoint from HuggingFace: {ckpt_path}")
+        except Exception as e:
+            print(f"ERROR: Could not download checkpoint from HuggingFace: {e}")
+            print(f"Model name: {config['trainer']['logger']['init_args']['name']}")
+            print("Please provide --ckpt_path with local checkpoint file path")
+            return
 
     # --- Build model ---
     model, img_size = build_eomt_model(config, ckpt_path, device)
