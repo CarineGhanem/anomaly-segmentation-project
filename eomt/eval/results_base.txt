@@ -28,3 +28,4 @@ Dataset: fs_static | Method: entropy | AUPRC: 29.34 | FPR@TPR95: 34.11
 Dataset: RoadAnomaly | Method: msp | AUPRC: 75.68 | FPR@TPR95: 19.30
 Dataset: RoadAnomaly | Method: max_logit | AUPRC: 75.14 | FPR@TPR95: 19.05
 Dataset: RoadAnomaly | Method: entropy | AUPRC: 78.12 | FPR@TPR95: 18.79
+Model: EOMT | mIoU: 77.41

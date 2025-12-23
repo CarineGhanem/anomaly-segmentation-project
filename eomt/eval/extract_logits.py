@@ -202,12 +202,10 @@ def main():
     parser.add_argument("--input", type=str,
                         default="../../Validation_Dataset/RoadAnomaly21/images/*.png")
     parser.add_argument("--config", type=str,
-                        default="../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml",
-                        help="Path to YAML config file. Default: eomt_base_640.yaml")
+                        default="../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml")
     parser.add_argument("--save_dir", type=str, default="./saved_logits")
     parser.add_argument("--cpu", action="store_true")
-    parser.add_argument("--ckpt_path", type=str, default=None,
-                        help="Local path to checkpoint file (if not on HuggingFace). If not provided, will try to download from HuggingFace.")
+    parser.add_argument("--ckpt_path", type=str, default=None)
     args = parser.parse_args()
 
     # --- Select device ---

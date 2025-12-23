@@ -28,16 +28,21 @@ sys.path.append(project_root)
 
 NUM_CLASSES = 20  # EoMT outputs 20 classes (0-19), where 19 is background/void (ignore)
 
-input_transform_cityscapes = Compose([
-    Resize((1024, 1024), Image.BILINEAR),  # EoMT uses 1024x1024
-    ToTensor(),
-])
 
-target_transform_cityscapes = Compose([
-    Resize((1024, 1024), Image.NEAREST),
-    ToLabel(),
-    Relabel(255, 19),   # ignore label to 19
-])
+def create_transforms(img_size):
+    """Create transforms based on model's image size"""
+    input_transform = Compose([
+        Resize(img_size, Image.BILINEAR),
+        ToTensor(),
+    ])
+    
+    target_transform = Compose([
+        Resize(img_size, Image.NEAREST),
+        ToLabel(),
+        Relabel(255, 19),   # ignore label to 19
+    ])
+    
+    return input_transform, target_transform
 
 
 def build_eomt_model(config, ckpt_path, device):
@@ -160,7 +165,10 @@ def eomt_forward_predictions(model, img_tensor, device, target_size):
 def main():
     parser = ArgumentParser()
     parser.add_argument("--config", type=str,
-                        default="../configs/dinov2/cityscapes/semantic/eomt_large_1024.yaml")
+                        default="../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml",
+                        help="Path to YAML config file. Default: eomt_base_640.yaml")
+    parser.add_argument("--ckpt_path", type=str, default=None,
+                        help="Local path to checkpoint file (if not on HuggingFace). If not provided, will try to download from HuggingFace.")
     parser.add_argument("--datadir", type=str,
                         default="E:\\advanced machine learning\\project-kevser")
     parser.add_argument("--subset", type=str, default="val")
@@ -184,12 +192,32 @@ def main():
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    # Resolve HF checkpoint
-    model_name = config["trainer"]["logger"]["init_args"]["name"]
-    ckpt_path = hf_hub_download(f"tue-mps/{model_name}", "pytorch_model.bin")
+    # Resolve checkpoint path
+    if args.ckpt_path:
+        # Use local checkpoint file
+        ckpt_path = args.ckpt_path
+        if not os.path.exists(ckpt_path):
+            print(f"ERROR: Checkpoint file not found: {ckpt_path}")
+            return
+        print(f"Using local checkpoint: {ckpt_path}")
+    else:
+        # Try to download from HuggingFace
+        try:
+            model_name = config["trainer"]["logger"]["init_args"]["name"]
+            ckpt_path = hf_hub_download(f"tue-mps/{model_name}", "pytorch_model.bin")
+            print(f"Downloaded checkpoint from HuggingFace: {ckpt_path}")
+        except Exception as e:
+            print(f"ERROR: Could not download checkpoint from HuggingFace: {e}")
+            print(f"Model name: {config['trainer']['logger']['init_args']['name']}")
+            print("Please provide --ckpt_path with local checkpoint file path")
+            return
 
     # Build model
     model, img_size = build_eomt_model(config, ckpt_path, device)
+    
+    # Create transforms based on model's image size
+    input_transform_cityscapes, target_transform_cityscapes = create_transforms(img_size)
+    print(f"Using image size: {img_size}")
 
     # Check Cityscapes directory structure
     leftImg8bit_path = os.path.join(args.datadir, "leftImg8bit", args.subset)
