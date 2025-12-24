@@ -47,9 +47,21 @@ def main(args):
 
     model = ERFNet(NUM_CLASSES)
 
-    #model = torch.nn.DataParallel(model)
-    if (not args.cpu):
-        model = torch.nn.DataParallel(model).cuda()
+    # Select device (CPU/CUDA) based on args.cpu and CUDA availability
+    if args.cpu:
+        device = torch.device("cpu")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    
+    print(f"Using device: {device}")
+    
+    # Move model to selected device, use DataParallel for CUDA
+    if device.type == "cuda":
+        model = torch.nn.DataParallel(model).to(device)
+    else:
+        model = model.to(device)
 
     def load_my_state_dict(model, state_dict):  #custom function to load model when not all dict elements
         own_state = model.state_dict()
@@ -64,14 +76,20 @@ def main(args):
                 own_state[name].copy_(param)
         return model
 
-    model = load_my_state_dict(model, torch.load(weightspath, map_location=lambda storage, loc: storage))
+    try:
+        state_dict = torch.load(weightspath, map_location=lambda storage, loc: storage, weights_only=False)
+    except TypeError:
+        state_dict = torch.load(weightspath, map_location=lambda storage, loc: storage)
+    model = load_my_state_dict(model, state_dict)
     print ("Model and weights LOADED successfully")
 
 
     model.eval()
 
-    if(not os.path.exists(args.datadir)):
-        print ("Error: datadir could not be loaded")
+    if not os.path.exists(args.datadir):
+        print(f"Error: datadir could not be loaded: {args.datadir}")
+        print(f"Expected Cityscapes structure: {args.datadir}\\leftImg8bit\\val and {args.datadir}\\gtFine\\val")
+        return
 
 
     loader = DataLoader(cityscapes(args.datadir, input_transform_cityscapes, target_transform_cityscapes, subset=args.subset), num_workers=args.num_workers, batch_size=args.batch_size, shuffle=False)
@@ -82,9 +100,8 @@ def main(args):
     start = time.time()
 
     for step, (images, labels, filename, filenameGt) in enumerate(loader):
-        if (not args.cpu):
-            images = images.cuda()
-            labels = labels.cuda()
+        images = images.to(device)
+        labels = labels.to(device)
 
         inputs = Variable(images)
         with torch.no_grad():
@@ -131,6 +148,26 @@ def main(args):
     print("=======================================")
     iouStr = getColorEntry(iouVal)+'{:0.2f}'.format(iouVal*100) + '\033[0m'
     print ("MEAN IoU: ", iouStr, "%")
+    
+    # Save mIoU to results file
+    results_file = args.results_file
+    model_name = "ERFNET"
+    
+    # Remove old mIoU result for this model if exists
+    if os.path.exists(results_file):
+        with open(results_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        with open(results_file, 'w', encoding='utf-8') as f:
+            for line in lines:
+                # Keep line if it doesn't match current model mIoU entry
+                if not (f'Model: {model_name} | mIoU:' in line):
+                    f.write(line)
+    
+    # Append new mIoU result
+    with open(results_file, 'a', encoding='utf-8') as f:
+        result_line = f'Model: {model_name} | mIoU: {iouVal*100:.2f}\n'
+        f.write(result_line)
+        print(f"\nmIoU saved to {results_file}: {iouVal*100:.2f}%")
 
 if __name__ == '__main__':
     parser = ArgumentParser()
@@ -145,5 +182,7 @@ if __name__ == '__main__':
     parser.add_argument('--num-workers', type=int, default=4)
     parser.add_argument('--batch-size', type=int, default=1)
     parser.add_argument('--cpu', action='store_true')
+    parser.add_argument('--results-file', type=str, default='results.txt',
+                        help='File to save mIoU results')
 
     main(parser.parse_args())
