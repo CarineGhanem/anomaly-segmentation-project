@@ -210,9 +210,17 @@ __marimo__/
 #saved logits
 saved_logits/*/*
 *.npz
+*.zip
 
 #don't save models on github
 *.bin
 
 #wandb files
 wandb/
+
+
+#validation dataset
+Validation_Dataset/
+*.png
+*.webp
+*jpg
