@@ -1,10 +1,12 @@
 Call extract logits first which takes the path to the dataset and the model name, default eomt L 1024, trianed on cityspaces.
 
+-run extract_logits.py within the eomt/eval folder
+
 usage example:
 eval % python extract_logits.py \
  --input "datapath/RoadAnomaly21/images/\*.jpg" \
- --model_id tue-mps/cityscapes_semantic_eomt_large_1024 \
- --save_dir ./saved_logits
+ --config "../configs/dinov2/cityscapes/semantic/eomt_large_1024.yaml"
+--save_dir ./saved_logits
 
 The logits will be saved under eval/saved_logits/RoadAnomaly
 

@@ -218,9 +218,12 @@ saved_logits/*/*
 #wandb files
 wandb/
 
-
-#validation dataset
+#dataset images
 Validation_Dataset/
 *.png
+*.jpg
+*.jpeg
 *.webp
-*jpg
+
+#saved logits archives
+*.zip
