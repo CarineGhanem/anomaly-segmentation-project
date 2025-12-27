@@ -255,12 +255,9 @@ def main():
             line_dataset = parsed.get("Dataset", None)
             line_method  = parsed.get("Method", None)
 
-            # Keep line unless BOTH dataset and method match exactly
             if line_dataset == dataset_name and line_method == method:
-                continue  # this is the old entry → delete it
-
+                continue  
             updated.append(line)
-        # Add new line and write file
         updated.append(new_line)
         with open(save_file, "w") as f:
             f.writelines(updated)
@@ -269,21 +266,11 @@ def main():
 
     print(f"\n✓ Saved results to: {save_file}")
 
-    # Summary printout
     print("\nFinal Summary:")
     for method, (prc, fpr) in results.items():
         fpr_str = f"{fpr*100:.2f}" if not np.isnan(fpr) else "nan"
         print(f"{method}: AUPRC {prc*100:.2f} | FPR95 {fpr_str}")
 
-    # Save results to file
-    results_file = args.results_file
-    with open(results_file, 'a', encoding='utf-8') as f:
-        for method, (prc, fpr) in results.items():
-            fpr_str = f"{fpr*100:.2f}" if not np.isnan(fpr) else "nan"
-            result_line = f'Dataset: {dataset_name} | Method: {method} | AUPRC: {prc*100:.2f} | FPR@TPR95: {fpr_str}\n'
-            f.write(result_line)
-    
-    print(f"\nResults saved to {results_file}")
 
 
 if __name__ == "__main__":
