@@ -129,7 +129,7 @@ def main():
         model = load_my_state_dict(model, torch.load(weightspath, map_location=lambda storage, loc: storage, weights_only=False))
     except TypeError:
         # Fallback for older PyTorch versions that don't support weights_only
-    model = load_my_state_dict(model, torch.load(weightspath, map_location=lambda storage, loc: storage))
+        model = load_my_state_dict(model, torch.load(weightspath, map_location=lambda storage, loc: storage))
     print ("Model and weights LOADED successfully")
     model.eval()
     
