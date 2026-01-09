@@ -46,7 +46,10 @@ def parse_args():
     parser = ArgumentParser()
     parser.add_argument("--logits_dir", type=str, required=True,
                         help="Directory containing saved .npz logits")
-    parser.add_argument("--temp_range", type=str, default="0.5,1.0,1.5,2.0,2.5,3.0,5.0,10.0",
+
+   
+    parser.add_argument("--temp_range", type=str,
+                        default="0.5,0.75,1.0,1.1,1.5,2.0,2.5,3.0,5.0,10.0",
                         help="Comma-separated temperature values to test")
     return parser.parse_args()
 
@@ -83,8 +86,10 @@ def evaluate_method(all_scores, all_gts):
 def main():
     args = parse_args()
 
+    FIXED_MIOU_PERCENT = 80.50
+
     # Parse temperature range
-    temperatures = [float(t) for t in args.temp_range.split(",")]
+    temperatures = [float(t) for t in args.temp_range.split(",") if t.strip() != ""]
     print(f"Testing temperatures: {temperatures}\n")
 
     # Load logits paths
@@ -95,20 +100,26 @@ def main():
     # Determine dataset name
     dataset_name = os.path.basename(args.logits_dir.rstrip("/"))
 
-    # Output file for best temperature
-    output_file = os.path.join(args.logits_dir, "best_temperature.txt")
+    # Output files
+  
+    table_file = os.path.join(args.logits_dir, "Temperaturetest.txt")
 
     print("=" * 60)
     print("MSP Temperature Search")
     print("=" * 60)
     print(f"Dataset: {dataset_name}")
     print(f"Files: {len(files)}")
+    print(f"Fixed mIoU (semantic): {FIXED_MIOU_PERCENT:.2f}")
     print("=" * 60)
     print()
 
     best_temp = 1.0
     best_auprc = 0.0
     best_fpr95 = 100.0
+
+    # Store results per temperature for table writing
+    # results[temp] = (auprc, fpr95)
+    results = {}
 
     # Test each temperature
     for temp in temperatures:
@@ -138,8 +149,9 @@ def main():
 
         # Evaluate
         prc_auc, fpr95 = evaluate_method(all_scores, all_gts)
+        results[temp] = (prc_auc, fpr95)
 
-        print(f"T={temp:>5.1f} → AUPRC: {prc_auc*100:>6.2f} | FPR@95: {fpr95*100:>6.2f}")
+        print(f"T={temp:>5.2f} → AUPRC: {prc_auc*100:>6.2f} | FPR@95: {fpr95*100:>6.2f}")
 
         # Track best based on AUPRC (primary metric)
         if prc_auc > best_auprc:
@@ -150,20 +162,30 @@ def main():
     print()
     print("=" * 60)
     print(f"✓ Best Temperature: {best_temp}")
+    print(f"  mIoU (fixed): {FIXED_MIOU_PERCENT:.2f}")
     print(f"  AUPRC: {best_auprc*100:.2f}")
     print(f"  FPR@95: {best_fpr95*100:.2f}")
     print("=" * 60)
 
-    # Save results
-    with open(output_file, "w") as f:
-        f.write(f"Dataset: {dataset_name}\n")
-        f.write("=" * 60 + "\n\n")
-        f.write(f"Method: MSP\n")
-        f.write(f"Best Temperature: {best_temp}\n")
-        f.write(f"AUPRC: {best_auprc*100:.2f}\n")
-        f.write(f"FPR@95: {best_fpr95*100:.2f}\n")
 
-    print(f"\n✓ Results saved to: {output_file}")
+    # Save Temperaturetest.txt in YOUR requested table row format
+    def row(temp):
+        if temp in results:
+            au, fp = results[temp]
+            return f"{FIXED_MIOU_PERCENT:.2f}\t{au*100:.2f}\t{fp*100:.2f}"
+        return f"{FIXED_MIOU_PERCENT:.2f}\tNA\tNA"
+
+    with open(table_file, "w") as f:
+        f.write(f"{dataset_name}\n")
+        f.write("Method\tmIoU\tAuPRC\tFPR95\n")
+        f.write(f"MSP\t{row(1.0)}\n")
+        f.write(f"MSP(t = 0.5)\t{row(0.5)}\n")
+        f.write(f"MSP(t = 0.75)\t{row(0.75)}\n")
+        f.write(f"MSP(t = 1.1)\t{row(1.1)}\n")
+        f.write(f"MSP (best t = {best_temp})\t{FIXED_MIOU_PERCENT:.2f}\t{best_auprc*100:.2f}\t{best_fpr95*100:.2f}\n")
+
+   
+    print(f"✓ Temperature table saved to: {table_file}")
 
 
 if __name__ == "__main__":
