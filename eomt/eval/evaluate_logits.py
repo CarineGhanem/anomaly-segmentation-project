@@ -9,6 +9,7 @@
 #& "D:\python3.11\pyhon3.11\python.exe" evaluate_logits.py --logits_dir ./saved_logits/FS_LostFound_full
 #& "D:\python3.11\pyhon3.11\python.exe" evaluate_logits.py --logits_dir ./saved_logits/fs_static
 #& "D:\python3.11\pyhon3.11\python.exe" evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly
+
 import os
 import glob
 import numpy as np
@@ -32,7 +33,6 @@ def stable_softmax(pixel_logits):
 # Compute anomaly map from pixel logits
 # ============================================================
 def anomaly_scores_from_pixel_logits(pixel_logits, method):
-
     if method == "msp":  # 1 - max softmax prob
         sm = stable_softmax(pixel_logits)
         anomaly = 1.0 - np.max(sm, axis=0)
@@ -43,6 +43,12 @@ def anomaly_scores_from_pixel_logits(pixel_logits, method):
 
     elif method == "max_logit":  # negative max logit
         anomaly = -np.max(pixel_logits, axis=0)
+
+    elif method == "rba":
+        # Official-style RbA on dense logits:
+        # RbA(x) = - sum_c tanh(logits_c(x))
+        # Higher (closer to 0) => more anomalous
+        anomaly = -np.tanh(pixel_logits).sum(axis=0)
 
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -63,14 +69,13 @@ def parse_args():
 
 
 # ============================================================
-# Compute AUPRC + FPR@95 for a given method
+# Compute AUPRC + FPR@95 for a given method 
 # ============================================================
 def evaluate_method(all_scores, all_gts):
     """
     all_scores: list of 2D arrays
-    all_gts: list of 2D arrays
+    all_gts:    list of 2D arrays
     """
-    # Flatten all scores and GTs to 1D arrays
     anomaly_scores = np.concatenate([score.flatten() for score in all_scores])
     ood_gts = np.concatenate([gt.flatten() for gt in all_gts])
 
@@ -84,12 +89,10 @@ def evaluate_method(all_scores, all_gts):
 
     ood_out = anomaly_scores[ood_mask]
     ind_out = anomaly_scores[ind_mask]
-
     # Check for empty arrays
     if len(ood_out) == 0:
         print("WARNING: No anomaly pixels found!")
         return 0.0, np.nan
-    
     if len(ind_out) == 0:
         print("WARNING: No normal pixels found!")
         return 0.0, np.nan
@@ -103,61 +106,17 @@ def evaluate_method(all_scores, all_gts):
     return prc_auc, fpr95
 
 
-def rba_region_scores(rba_map, gt_mask):
-    """
-    rba_map: [H, W] with RbA pixel scores
-    gt_mask: [H, W] with 1 = OOD, 0 = ID
-    Returns:
-        region_scores: list of region-level scalar scores
-        region_labels: list of 0/1 (1=OOD region, 0=ID region)
-    """
-    # ---------------------------------------------------------
-    # Extract connected components for region-level scoring
-    # ---------------------------------------------------------
-    print("Rba computation...")
-    labeled, num_regions = label(gt_mask == 1)
-
-    region_scores = []
-    region_labels = []
-
-    # Add POSITIVE regions
-    for rid in range(1, num_regions + 1):
-        region = labeled == rid
-        if region.sum() == 0:
-            continue
-        s = rba_map[region].max()
-        region_scores.append(s)
-        region_labels.append(1)
-
-    # Add a NEGATIVE region (all ID pixels)
-    # Sample multiple negative ID regions
-    id_labeled, num_id_regions = label(gt_mask == 0)
-
-    for rid in range(1, num_id_regions + 1):
-        region = id_labeled == rid
-        if region.sum() == 0:
-            continue
-        s = rba_map[region].max()
-        region_scores.append(s)
-        region_labels.append(0)
-
-    return region_scores, region_labels
-
-
-
 # ============================================================
 # MAIN EVALUATION LOOP
 # ============================================================
 def main():
     args = parse_args()
-
     # Load logits paths
     files = sorted(glob.glob(os.path.join(args.logits_dir, "*.npz")))
     save_file = args.results_file
     if len(files) == 0:
         print(f"ERROR: No .npz files found in {args.logits_dir}")
         return
-
     # Extract dataset name from logits_dir
     dataset_name = os.path.basename(os.path.normpath(args.logits_dir))
 
@@ -173,66 +132,37 @@ def main():
         for f in files:
             data = np.load(f)
             gt = data["mask_gt"].astype(np.uint8, copy=False)
-            pixel_logits = data["pixel_logits"].astype(np.float32, copy=False)
-            # Only needed for rba
-            rba_map = data["rba_map"].astype(np.float32, copy=False) if "rba_map" in data.files else None
-            # Ensure GT mask is uint8 and has correct values
-            if gt.dtype != np.uint8:
-                gt = gt.astype(np.uint8)
-            
-            # Check for invalid values in GT mask
+            pixel_logits = data["pixel_logits"].astype(np.float32, copy=False)  # [C,H,W]
+
+            # Validate GT mask values
             invalid_values = np.setdiff1d(np.unique(gt), [0, 1, 255])
             if len(invalid_values) > 0:
                 print(f"WARNING: Invalid values in GT mask {os.path.basename(f)}: {invalid_values}")
-                # Clip invalid values to valid range
-                gt = np.clip(gt, 0, 255)
-                gt = np.where(np.isin(gt, [0, 1, 255]), gt, 255)  # Set invalid to ignore
+                gt = np.where(np.isin(gt, [0, 1, 255]), gt, 255).astype(np.uint8)
 
-            # resize logits to GT shape if needed
+            # Resize logits to GT shape if needed
             C, Hm, Wm = pixel_logits.shape
             H_gt, W_gt = gt.shape
             if (Hm, Wm) != (H_gt, W_gt):
                 resized_logits = np.zeros((C, H_gt, W_gt), dtype=pixel_logits.dtype)
                 for c in range(C):
-                    resized_logits[c] = cv2.resize(pixel_logits[c],
-                                                   (W_gt, H_gt),
-                                                   interpolation=cv2.INTER_LINEAR)
+                    resized_logits[c] = cv2.resize(
+                        pixel_logits[c],
+                        (W_gt, H_gt),
+                        interpolation=cv2.INTER_LINEAR
+                    )
                 pixel_logits = resized_logits
 
-            # Rba
-            if method == "rba":
-                if rba_map is None:
-                    print(f"WARNING: rba_map not found in {os.path.basename(f)}; skipping")
-                    continue
-
-                H_gt, W_gt = gt.shape
-                if rba_map.shape != gt.shape:
-                    rba_map = cv2.resize(rba_map, (W_gt, H_gt), interpolation=cv2.INTER_LINEAR)
-
-                rs, rl = rba_region_scores(rba_map, gt)
-                region_scores_total.extend(rs)
-                region_labels_total.extend(rl)
-                continue
-
-            # Pixel level anomaly map
-            anomaly = anomaly_scores_from_pixel_logits(pixel_logits, method)
-
+            anomaly = anomaly_scores_from_pixel_logits(pixel_logits, method)  # [H,W]
             all_scores.append(anomaly)
             all_gts.append(gt)
 
-        # Compute metrics
-        if method == "rba":
-            prc = average_precision_score(region_labels_total, region_scores_total)
-            fpr = fpr_at_95_tpr(region_scores_total, region_labels_total)
-
-        else:
-            prc, fpr = evaluate_method(all_scores, all_gts)
-
+        prc, fpr = evaluate_method(all_scores, all_gts)
         results[method] = (prc, fpr)
-
         # -------------------------------------------------------
         # Update results.txt (replace previous entries for dataset+method)
         # -------------------------------------------------------
+
         new_line = (
             f"Dataset: {dataset_name} | "
             f"Method: {method} | "
@@ -254,10 +184,10 @@ def main():
 
             line_dataset = parsed.get("Dataset", None)
             line_method  = parsed.get("Method", None)
-
             if line_dataset == dataset_name and line_method == method:
                 continue  
             updated.append(line)
+
         updated.append(new_line)
         with open(save_file, "w") as f:
             f.writelines(updated)
@@ -270,7 +200,6 @@ def main():
     for method, (prc, fpr) in results.items():
         fpr_str = f"{fpr*100:.2f}" if not np.isnan(fpr) else "nan"
         print(f"{method}: AUPRC {prc*100:.2f} | FPR95 {fpr_str}")
-
 
 
 if __name__ == "__main__":

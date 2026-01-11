@@ -197,35 +197,8 @@ def eomt_forward_logits(model, img_tensor, device):
         stitched = model.revert_window_logits_semantic(per_pixel, origins, img_sizes)
         pixel_logits = stitched[0]  # [C, H, W]
 
-        # ---- RbA per-crop -> stitch to full image ----
-        rba_crop = rba_scores_torch(mask_logits_up.float(), class_logits_last.float())  # [B, H, W]
-        rba_crop = rba_crop.unsqueeze(1)  # [B, 1, H, W] to reuse revert_window_logits_semantic
-        stitched_rba = model.revert_window_logits_semantic(rba_crop, origins, img_sizes)
-        rba_map = stitched_rba[0][0]  # [H, W]
+    return pixel_logits
 
-    return pixel_logits, rba_map
-
-def rba_scores_torch(mask_logits_up, class_logits, C=None):
-    """
-    mask_logits_up: [B, Q, H, W]  (upsampled to target H,W like you already do)
-    class_logits:   [B, Q, C]
-    returns:        [B, H, W]     (RbA score map per crop)
-    """
-    B, Q, H, W = mask_logits_up.shape
-    if C is None:
-        C = class_logits.shape[-1]
-
-    out = torch.zeros((B, H, W), device=mask_logits_up.device, dtype=torch.float32)
-
-    # Loop only over classes (C ~ 19) -> RAM-safe
-    for k in range(C):
-        # vals: [B, Q, H, W]
-        vals = mask_logits_up + class_logits[:, :, k].unsqueeze(-1).unsqueeze(-1)
-        # logsumexp over Q -> [B, H, W]
-        Lk = torch.logsumexp(vals, dim=1)
-        out += torch.tanh(Lk)
-
-    return out
 
 # ============================================================
 # MAIN SCRIPT
@@ -297,10 +270,9 @@ def main():
         img = input_tf(Image.open(path).convert("RGB")).to(device)
 
         # --- Forward pass → pixel logits + mask logits + class logits ---
-        pixel_logits, rba_map = eomt_forward_logits(model, img, device)
+        pixel_logits = eomt_forward_logits(model, img, device)
 
         pixel_logits_np = pixel_logits.detach().cpu().to(torch.float16).numpy()
-        rba_map_np      = rba_map.detach().cpu().to(torch.float16).numpy()
         # --- Load + remap GT mask ---
         pathGT = path.replace("images", "labels_masks") \
                      .replace(".jpg", ".png") \
@@ -319,7 +291,6 @@ def main():
         np.savez_compressed(
         save_path,
         pixel_logits=pixel_logits_np,
-        rba_map=rba_map_np,
         mask_gt=mask_np.astype(np.uint8)
     )
 
