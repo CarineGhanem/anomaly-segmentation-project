@@ -1,0 +1,12 @@
+# configs/stageB.yaml
+trainer:
+  max_steps: 10000
+  logger:
+    init_args:
+      name: "cs_eomt_ln_stageB_queries"
+
+model:
+  init_args:
+    finetune_stage: "B_queries"
+    lr: 0.001
+    train_heads_in_stage_b: True

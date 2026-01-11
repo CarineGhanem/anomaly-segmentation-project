@@ -1,0 +1,60 @@
+# configs/ablation_ln_stageA.yaml
+
+trainer:
+  max_steps: 5000
+  precision: "16-mixed"
+  accumulate_grad_batches: 8
+  gradient_clip_val: 0.01
+  gradient_clip_algorithm: "norm"
+  log_every_n_steps: 50
+  val_check_interval: 1000
+  enable_model_summary: False
+  devices: 1
+
+  logger:
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
+    init_args:
+      resume: allow
+      project: "eomt"
+      name: "cs_eomt_ln_stageA_head"
+
+model:
+  class_path: training.mask_classification_semantic.MaskClassificationSemantic
+  init_args:
+    attn_mask_annealing_enabled: True
+    attn_mask_annealing_start_steps: [3317, 8292, 13268]
+    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+
+    # LogitNorm
+    use_logit_norm: True
+
+    # Stage control (FLAT keys)
+    finetune_stage: "A_head"
+    train_heads_in_stage_b: True
+    train_heads_in_stage_c: True
+
+    # Optimizer control (FLAT keys)
+    lr: 0.001
+    weight_decay: 0.01
+
+    # LoRA config (base init expects a dict; disabled for Stage A)
+    lora:
+      enabled: False
+      r: 8
+      alpha: 16
+      dropout: 0.05
+      target: "decoder"
+      backbone_last_n: 0
+
+    network:
+      class_path: models.eomt.EoMT
+      init_args:
+        num_q: 100
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name: vit_base_patch14_reg4_dinov2
+
+data:
+  class_path: datasets.cityscapes_semantic.CityscapesSemantic

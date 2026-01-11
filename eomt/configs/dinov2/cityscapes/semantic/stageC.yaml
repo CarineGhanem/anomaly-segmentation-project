@@ -1,0 +1,19 @@
+# configs/stageC.yaml
+trainer:
+  max_steps: 20000
+  logger:
+    init_args:
+      name: "cs_eomt_ln_stageC_lora"
+
+model:
+  init_args:
+    finetune_stage: "C_lora"
+    lr: 0.0003
+
+    lora:
+      enabled: True
+      r: 8
+      alpha: 16
+      dropout: 0.05
+      target: "decoder"
+      backbone_last_n: 0
