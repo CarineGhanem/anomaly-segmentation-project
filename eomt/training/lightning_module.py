@@ -111,6 +111,38 @@ class LightningModule(lightning.LightningModule):
         self.train_heads_in_stage_c = train_heads_in_stage_c
         self.use_logit_norm = use_logit_norm  # pass to semantic conversion calls
 
+
+    def _unfreeze_if_exists(self, attr_names: list[str]) -> None:
+        for attr in attr_names:
+            if hasattr(self.network, attr):
+                mod = getattr(self.network, attr)
+                if isinstance(mod, nn.Module):
+                    for p in mod.parameters():
+                        p.requires_grad = True
+                    logging.info(f"Unfroze network.{attr}")
+                    return
+                if isinstance(mod, (nn.Parameter, torch.Tensor)):
+                    mod.requires_grad = True
+                    logging.info(f"Unfroze network.{attr} (tensor/param)")
+                    return
+        # In your case, I'd keep this as DEBUG-level or silent to avoid spam
+        logging.debug(f"No attrs found among: {attr_names}")
+
+
+    def _unfreeze_queries(self) -> None:
+        # EoMT uses `self.q = nn.Embedding(...)`
+        if hasattr(self.network, "q") and isinstance(self.network.q, nn.Embedding):
+            self.network.q.weight.requires_grad = True
+            logging.info("Unfroze network.q.weight")
+            return
+        raise AttributeError("EoMT query embeddings not found at network.q (expected nn.Embedding).")
+
+
+    def inject_lora_if_enabled(self) -> None:
+        if not self.lora or not isinstance(self.lora, dict) or not self.lora.get("enabled", False):
+            return
+        raise NotImplementedError("LoRA enabled but inject_lora_if_enabled is not implemented yet.")
+
     def on_fit_start(self):
         self.apply_finetune_stage()
 
@@ -127,8 +159,9 @@ class LightningModule(lightning.LightningModule):
             return
 
         if stage == "A_head":
-            self._unfreeze_if_exists(["class_head", "class_predictor"])
-            self._unfreeze_if_exists(["mask_head", "mask_predictor", "mask_mlp"])
+            self._unfreeze_if_exists(["class_head"])
+            self._unfreeze_if_exists(["mask_head"])
+
 
             #sanity logging info
             trainable = [(n, p.numel()) for n,p in self.network.named_parameters() if p.requires_grad]
@@ -139,10 +172,10 @@ class LightningModule(lightning.LightningModule):
             return
 
         if stage == "B_queries":
-            self._unfreeze_queries()
+            self._unfreeze_queries()  # should unfreeze network.q.weight
             if self.train_heads_in_stage_b:
-                self._unfreeze_if_exists(["class_head", "class_predictor"])
-                self._unfreeze_if_exists(["mask_head", "mask_predictor", "mask_mlp"])
+                self._unfreeze_if_exists(["class_head"])
+                self._unfreeze_if_exists(["mask_head"])
             return
 
         if stage == "C_lora":
@@ -154,8 +187,8 @@ class LightningModule(lightning.LightningModule):
                 if "lora_" in n:
                     p.requires_grad = True
             if self.train_heads_in_stage_c:
-                self._unfreeze_if_exists(["class_head", "class_predictor"])
-                self._unfreeze_if_exists(["mask_head", "mask_predictor", "mask_mlp"])
+                self._unfreeze_if_exists(["class_head"])
+                self._unfreeze_if_exists(["mask_head"])
             return
 
         raise ValueError(stage)
