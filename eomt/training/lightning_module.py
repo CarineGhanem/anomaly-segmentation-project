@@ -59,6 +59,12 @@ class LightningModule(lightning.LightningModule):
         ckpt_path=None,
         delta_weights=False,
         load_ckpt_class_head=True,
+        finetune_stage: str = "full",  # "full", "A_head", "B_queries", "C_lora"
+        lora: Optional[dict] = None,
+        train_heads_in_stage_b: bool = True,
+        train_heads_in_stage_c: bool = True,
+        use_logit_norm: bool = False,  # so you can pass to semantic conversion calls
+
     ):
         super().__init__()
 
@@ -99,6 +105,61 @@ class LightningModule(lightning.LightningModule):
 
         self.log = torch.compiler.disable(self.log)  # type: ignore
 
+        self.finetune_stage = finetune_stage
+        self.lora = lora
+        self.train_heads_in_stage_b = train_heads_in_stage_b
+        self.train_heads_in_stage_c = train_heads_in_stage_c
+        self.use_logit_norm = use_logit_norm  # pass to semantic conversion calls
+
+    def on_fit_start(self):
+        self.apply_finetune_stage()
+
+    def apply_finetune_stage(self):
+        stage = self.finetune_stage
+
+        # freeze all
+        for p in self.network.parameters():
+            p.requires_grad = False
+
+        if stage == "full":
+            for p in self.network.parameters():
+                p.requires_grad = True
+            return
+
+        if stage == "A_head":
+            self._unfreeze_if_exists(["class_head", "class_predictor"])
+            self._unfreeze_if_exists(["mask_head", "mask_predictor", "mask_mlp"])
+
+            #sanity logging info
+            trainable = [(n, p.numel()) for n,p in self.network.named_parameters() if p.requires_grad]
+            logging.info(f"[{stage}] trainable tensors: {len(trainable)}")
+            logging.info(f"[{stage}] trainable params: {sum(x for _,x in trainable):,}")
+            logging.info(f"[{stage}] examples: {[n for n,_ in trainable[:10]]}")
+            
+            return
+
+        if stage == "B_queries":
+            self._unfreeze_queries()
+            if self.train_heads_in_stage_b:
+                self._unfreeze_if_exists(["class_head", "class_predictor"])
+                self._unfreeze_if_exists(["mask_head", "mask_predictor", "mask_mlp"])
+            return
+
+        if stage == "C_lora":
+            self.inject_lora_if_enabled()
+            # freeze again then unfreeze LoRA params
+            for p in self.network.parameters():
+                p.requires_grad = False
+            for n, p in self.network.named_parameters():
+                if "lora_" in n:
+                    p.requires_grad = True
+            if self.train_heads_in_stage_c:
+                self._unfreeze_if_exists(["class_head", "class_predictor"])
+                self._unfreeze_if_exists(["mask_head", "mask_predictor", "mask_mlp"])
+            return
+
+        raise ValueError(stage)
+
     def configure_optimizers(self):
         encoder_param_names = {
             n for n, _ in self.network.encoder.backbone.named_parameters()
@@ -113,6 +174,10 @@ class LightningModule(lightning.LightningModule):
         ).tolist()
 
         for name, param in reversed(list(self.named_parameters())):
+            #backbone_param_groups and other_param_groups include only trainable params
+            if not param.requires_grad:
+                continue
+
             lr = self.lr
 
             if name.replace("network.encoder.backbone.", "") in encoder_param_names:
@@ -664,16 +729,32 @@ class LightningModule(lightning.LightningModule):
             for i, (sums, counts) in enumerate(zip(logit_sums, logit_counts))
         ]
 
+    #Logit norm option for semantic segmentation
     @staticmethod
     def to_per_pixel_logits_semantic(
-        mask_logits: torch.Tensor, class_logits: torch.Tensor
+        mask_logits: torch.Tensor,
+        class_logits: torch.Tensor,
+        use_logit_norm: bool = False,
+        eps: float = 1e-6,
     ):
+        """
+        mask_logits: [B, Q, H, W]  (raw mask logits)
+        class_logits: [B, Q, C+1]  (raw class logits)
+        """
+
+        if use_logit_norm:
+            # normalize across classes (including no-object)
+            print("Using logit normalization")
+            norm = torch.norm(class_logits, p=2, dim=-1, keepdim=True)
+            class_logits = class_logits / (norm + eps)
+
+        class_probs = class_logits.softmax(dim=-1)[..., :-1]
+
         return torch.einsum(
             "bqhw, bqc -> bchw",
             mask_logits.sigmoid(),
-            class_logits.softmax(dim=-1)[..., :-1],
+            class_probs,
         )
-
     @staticmethod
     @torch.compiler.disable
     def to_per_pixel_targets_semantic(

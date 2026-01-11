@@ -41,6 +41,11 @@ class MaskClassificationSemantic(LightningModule):
         ckpt_path: Optional[str] = None,
         delta_weights: bool = False,
         load_ckpt_class_head: bool = True,
+        use_logit_norm : bool = True,
+        finetune_stage: str = "full",
+        lora: Optional[dict] = None,
+        train_heads_in_stage_b: bool = True,
+        train_heads_in_stage_c: bool = True,
     ):
         super().__init__(
             network=network,
@@ -59,6 +64,12 @@ class MaskClassificationSemantic(LightningModule):
             ckpt_path=ckpt_path,
             delta_weights=delta_weights,
             load_ckpt_class_head=load_ckpt_class_head,
+            # NEW pass-through
+            finetune_stage=finetune_stage,
+            lora=lora,
+            train_heads_in_stage_b=train_heads_in_stage_b,
+            train_heads_in_stage_c=train_heads_in_stage_c,
+            use_logit_norm=use_logit_norm,
         )
 
         self.save_hyperparameters(ignore=["_class_path"])
@@ -78,6 +89,9 @@ class MaskClassificationSemantic(LightningModule):
             num_labels=num_classes,
             no_object_coefficient=no_object_coefficient,
         )
+        
+        #Logit norm option for semantic segmentation
+        self.use_logit_norm = use_logit_norm
 
         self.init_metrics_semantic(ignore_idx, self.network.num_blocks + 1 if self.network.masked_attn_enabled else 1)
 
@@ -99,7 +113,12 @@ class MaskClassificationSemantic(LightningModule):
             list(zip(mask_logits_per_layer, class_logits_per_layer))
         ):
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
-            crop_logits = self.to_per_pixel_logits_semantic(mask_logits, class_logits)
+
+            crop_logits = self.to_per_pixel_logits_semantic(
+                mask_logits,
+                class_logits,
+                use_logit_norm=(self.training and getattr(self, "use_logit_norm", False)),
+            )
             logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
 
             self.update_metrics_semantic(logits, targets, i)
