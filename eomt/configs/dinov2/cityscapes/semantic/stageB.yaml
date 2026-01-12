@@ -1,12 +1,96 @@
-# configs/stageB.yaml
+# ===============================================================
+# STAGE B: Query Embeddings Fine-tuning (5-10k iterations)
+# configs/ablation_ln_stageB.yaml
+# ===============================================================
+
 trainer:
   max_steps: 10000
+  precision: "16-mixed"
+  accumulate_grad_batches: 4
+  gradient_clip_val: 0.01
+  gradient_clip_algorithm: "norm"
+  log_every_n_steps: 50
+  val_check_interval: 1000
+  enable_model_summary: False
+  devices: 1
+
   logger:
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
+      resume: allow
+      project: "eomt"
       name: "cs_eomt_ln_stageB_queries"
 
 model:
+  class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:
+    # Image and class config
+    img_size: [512, 1024]
+    num_classes: 19
+
+    # Attention mask annealing
+    attn_mask_annealing_enabled: True
+    attn_mask_annealing_start_steps: [3317, 8292, 13268]
+    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+
+    # LogitNorm settings
+    use_logit_norm: True
+    logit_norm_temp: 0.1
+
+    # Stage control (FLAT keys)
     finetune_stage: "B_queries"
-    lr: 0.001
-    train_heads_in_stage_b: True
+    train_heads_in_stage_b: True # Also train heads in Stage B
+    train_heads_in_stage_c: True # Not used in Stage B, but required
+
+    # Checkpoint loading - Load from Stage A
+    ckpt_path: "outputs/stage_a/best.ckpt" # UPDATE THIS to your Stage A checkpoint
+    delta_weights: False
+    load_ckpt_class_head: True # Load trained heads from Stage A
+
+    # Optimizer control (FLAT keys) - Higher LR for queries
+    lr: 0.001 # 1e-3 for queries (they're small)
+    weight_decay: 0.01
+    llrd: 0.8
+    llrd_l2_enabled: True
+    lr_mult: 1.0
+    poly_power: 0.9
+    warmup_steps: [200, 500]
+
+    # Loss coefficients
+    mask_coefficient: 5.0
+    dice_coefficient: 5.0
+    class_coefficient: 2.0
+    no_object_coefficient: 0.1
+    mask_thresh: 0.8
+    overlap_thresh: 0.8
+
+    # Sampling for loss
+    num_points: 12544
+    oversample_ratio: 3.0
+    importance_sample_ratio: 0.75
+
+    # Semantic specific
+    ignore_idx: 255
+
+    # LoRA config (disabled for Stage B)
+    lora:
+      enabled: False
+      rank: 8
+      alpha: 16
+      dropout: 0.05
+      target_modules: ["q_proj", "v_proj", "k_proj", "out_proj"]
+      last_n_blocks: null
+
+    # Network architecture
+    network:
+      class_path: models.eomt.EoMT
+      init_args:
+        num_q: 100
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name: vit_base_patch14_reg4_dinov2
+
+data:
+  class_path: datasets.cityscapes_semantic.CityscapesSemantic

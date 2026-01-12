@@ -1,19 +1,97 @@
-# configs/stageC.yaml
+# ===============================================================
+# STAGE C - COLAB OPTIMIZED (for limited GPU)
+# configs/ablation_ln_stageC_colab.yaml
+# ===============================================================
+
 trainer:
-  max_steps: 20000
+  max_steps: 10000 # Reduced for Colab
+  precision: "16-mixed"
+  accumulate_grad_batches: 8 # Higher accumulation for small batch
+  gradient_clip_val: 0.01
+  gradient_clip_algorithm: "norm"
+  log_every_n_steps: 50
+  val_check_interval: 1000
+  enable_model_summary: False
+  devices: 1
+
   logger:
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
-      name: "cs_eomt_ln_stageC_lora"
+      resume: allow
+      project: "eomt"
+      name: "cs_eomt_ln_stageC_lora_colab"
 
 model:
+  class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:
-    finetune_stage: "C_lora"
-    lr: 0.0003
+    # Smaller image size for Colab
+    img_size: [384, 768] # Reduced from [512, 1024]
+    num_classes: 19
 
+    # Attention mask annealing
+    attn_mask_annealing_enabled: True
+    attn_mask_annealing_start_steps: [3317, 8292, 13268]
+    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+
+    # LogitNorm settings
+    use_logit_norm: True
+    logit_norm_temp: 0.1
+
+    # Stage control (FLAT keys)
+    finetune_stage: "C_lora"
+    train_heads_in_stage_b: True
+    train_heads_in_stage_c: True
+
+    # Checkpoint loading
+    ckpt_path: "outputs/stage_b/best.ckpt"
+    delta_weights: False
+    load_ckpt_class_head: True
+
+    # Optimizer control (FLAT keys)
+    lr: 0.0001
+    weight_decay: 0.01
+    llrd: 0.8
+    llrd_l2_enabled: True
+    lr_mult: 1.0
+    poly_power: 0.9
+    warmup_steps: [100, 200]
+
+    # Loss coefficients
+    mask_coefficient: 5.0
+    dice_coefficient: 5.0
+    class_coefficient: 2.0
+    no_object_coefficient: 0.1
+    mask_thresh: 0.8
+    overlap_thresh: 0.8
+
+    # Sampling for loss
+    num_points: 12544
+    oversample_ratio: 3.0
+    importance_sample_ratio: 0.75
+
+    # Semantic specific
+    ignore_idx: 255
+
+    # Minimal LoRA for Colab speed
     lora:
       enabled: True
-      r: 8
+      rank: 4 # Smaller rank for speed
       alpha: 16
-      dropout: 0.05
-      target: "decoder"
-      backbone_last_n: 0
+      dropout: 0.0 # No dropout for simplicity
+      target_modules: ["q_proj", "v_proj"] # Only Q and V
+      last_n_blocks: 2 # Only last 2 blocks
+      lr_mult: 1.0
+
+    # Network architecture
+    network:
+      class_path: models.eomt.EoMT
+      init_args:
+        num_q: 100
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name: vit_base_patch14_reg4_dinov2
+
+data:
+  class_path: datasets.cityscapes_semantic.CityscapesSemantic
