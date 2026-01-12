@@ -59,11 +59,11 @@ class LightningModule(lightning.LightningModule):
         ckpt_path=None,
         delta_weights=False,
         load_ckpt_class_head=True,
-        finetune_stage: str = "full",  # "full", "A_head", "B_queries", "C_lora"
-        lora: Optional[dict] = None,
-        train_heads_in_stage_b: bool = True,
-        train_heads_in_stage_c: bool = True,
-        use_logit_norm: bool = False,  # so you can pass to semantic conversion calls
+        finetune_stage: str = "full",  # NEW
+        lora: Optional[dict] = None,   # NEW
+        train_heads_in_stage_b: bool = True,  # NEW
+        train_heads_in_stage_c: bool = True,  # NEW
+        use_logit_norm: bool = False,  # NEW
 
     ):
         super().__init__()
@@ -105,93 +105,187 @@ class LightningModule(lightning.LightningModule):
 
         self.log = torch.compiler.disable(self.log)  # type: ignore
 
+        # new attributes for finetuning stages and LoRA
         self.finetune_stage = finetune_stage
         self.lora = lora
         self.train_heads_in_stage_b = train_heads_in_stage_b
         self.train_heads_in_stage_c = train_heads_in_stage_c
-        self.use_logit_norm = use_logit_norm  # pass to semantic conversion calls
-
+        self.use_logit_norm = use_logit_norm
+        self._lora_injected = False
 
     def _unfreeze_if_exists(self, attr_names: list[str]) -> None:
+        """Unfreeze network attributes if they exist."""
         for attr in attr_names:
             if hasattr(self.network, attr):
                 mod = getattr(self.network, attr)
                 if isinstance(mod, nn.Module):
                     for p in mod.parameters():
                         p.requires_grad = True
-                    logging.info(f"Unfroze network.{attr}")
+                    logging.info(f"✓ Unfroze network.{attr}")
                     return
                 if isinstance(mod, (nn.Parameter, torch.Tensor)):
                     mod.requires_grad = True
-                    logging.info(f"Unfroze network.{attr} (tensor/param)")
+                    logging.info(f"✓ Unfroze network.{attr} (tensor/param)")
                     return
-        # In your case, I'd keep this as DEBUG-level or silent to avoid spam
         logging.debug(f"No attrs found among: {attr_names}")
 
 
     def _unfreeze_queries(self) -> None:
-        # EoMT uses `self.q = nn.Embedding(...)`
+        """Unfreeze query embeddings."""
+        # Try EoMT style: self.q = nn.Embedding(...)
         if hasattr(self.network, "q") and isinstance(self.network.q, nn.Embedding):
             self.network.q.weight.requires_grad = True
-            logging.info("Unfroze network.q.weight")
+            logging.info("✓ Unfroze network.q.weight (query embeddings)")
             return
-        raise AttributeError("EoMT query embeddings not found at network.q (expected nn.Embedding).")
+        
+        # Try alternative: self.query_embed
+        if hasattr(self.network, "query_embed"):
+            query_embed = self.network.query_embed
+            if isinstance(query_embed, nn.Embedding):
+                query_embed.weight.requires_grad = True
+                logging.info("✓ Unfroze network.query_embed.weight")
+                return
+            elif isinstance(query_embed, nn.Parameter):
+                query_embed.requires_grad = True
+                logging.info("✓ Unfroze network.query_embed (parameter)")
+                return
+        
+        logging.warning("⚠ Query embeddings not found. Checked: network.q, network.query_embed")
 
 
     def inject_lora_if_enabled(self) -> None:
-        if not self.lora or not isinstance(self.lora, dict) or not self.lora.get("enabled", False):
+        """Inject LoRA adapters into the network if enabled and not already injected."""
+        if self._lora_injected:
+            logging.info("LoRA already injected, skipping...")
             return
-        raise NotImplementedError("LoRA enabled but inject_lora_if_enabled is not implemented yet.")
+        
+        if not self.lora or not isinstance(self.lora, dict) or not self.lora.get("enabled", False):
+            logging.info("LoRA not enabled")
+            return
+        
+        from training.lora_utils import inject_lora_into_model, count_lora_parameters
+        
+        # Get LoRA config
+        rank = self.lora.get("rank", 4)
+        alpha = self.lora.get("alpha", 16.0)
+        dropout = self.lora.get("dropout", 0.0)
+        target_modules = self.lora.get("target_modules", ["q_proj", "v_proj", "k_proj", "out_proj"])
+        lora_only_last_n_blocks = self.lora.get("last_n_blocks", None)
+        
+        logging.info(f"Injecting LoRA: rank={rank}, alpha={alpha}, dropout={dropout}")
+        logging.info(f"Target modules: {target_modules}")
+        
+        # Inject LoRA
+        num_injected = inject_lora_into_model(
+            self.network,
+            target_modules=target_modules,
+            rank=rank,
+            alpha=alpha,
+            dropout=dropout,
+            lora_only_last_n_blocks=lora_only_last_n_blocks,
+        )
+        
+        if num_injected == 0:
+            logging.warning("⚠ No LoRA adapters were injected! Check target_modules configuration.")
+        else:
+            lora_params, total_trainable = count_lora_parameters(self.network)
+            logging.info(f"✓ Injected {num_injected} LoRA adapters")
+            logging.info(f"✓ LoRA parameters: {lora_params:,}")
+            logging.info(f"✓ Total trainable: {total_trainable:,}")
+        
+        self._lora_injected = True
 
-    def on_fit_start(self):
-        self.apply_finetune_stage()
+    def setup(self, stage=None):
+        if stage == "fit":
+            self.apply_finetune_stage()   # <-- controls requires_grad BEFORE optimizer
+
 
     def apply_finetune_stage(self):
+        """Apply the specified fine-tuning stage."""
         stage = self.finetune_stage
+        
+        logging.info(f"\n{'='*60}")
+        logging.info(f"Applying fine-tuning stage: {stage}")
+        logging.info(f"{'='*60}\n")
 
-        # freeze all
+        # Freeze all parameters first
         for p in self.network.parameters():
             p.requires_grad = False
+        logging.info("✓ Froze all parameters")
 
         if stage == "full":
+            # Unfreeze everything
             for p in self.network.parameters():
                 p.requires_grad = True
+            trainable = sum(p.numel() for p in self.network.parameters() if p.requires_grad)
+            logging.info(f"✓ Full training mode - all {trainable:,} parameters unfrozen")
             return
 
         if stage == "A_head":
-            self._unfreeze_if_exists(["class_head"])
-            self._unfreeze_if_exists(["mask_head"])
-
-
-            #sanity logging info
-            trainable = [(n, p.numel()) for n,p in self.network.named_parameters() if p.requires_grad]
-            logging.info(f"[{stage}] trainable tensors: {len(trainable)}")
-            logging.info(f"[{stage}] trainable params: {sum(x for _,x in trainable):,}")
-            logging.info(f"[{stage}] examples: {[n for n,_ in trainable[:10]]}")
+            # Stage A: Only class and mask heads
+            self._unfreeze_if_exists(["class_head", "class_predictor"])
+            self._unfreeze_if_exists(["mask_head", "mask_predictor"])
             
+            # Log statistics
+            trainable = [(n, p.numel()) for n, p in self.network.named_parameters() if p.requires_grad]
+            total_trainable = sum(x for _, x in trainable)
+            logging.info(f"\n[Stage A - Head Only]")
+            logging.info(f"  Trainable parameters: {total_trainable:,}")
+            logging.info(f"  Trainable tensors: {len(trainable)}")
+            if trainable:
+                logging.info(f"  Examples: {[n for n, _ in trainable[:5]]}")
             return
 
         if stage == "B_queries":
-            self._unfreeze_queries()  # should unfreeze network.q.weight
+            # Stage B: Query embeddings + optionally heads
+            self._unfreeze_queries()
+            
             if self.train_heads_in_stage_b:
-                self._unfreeze_if_exists(["class_head"])
-                self._unfreeze_if_exists(["mask_head"])
+                self._unfreeze_if_exists(["class_head", "class_predictor"])
+                self._unfreeze_if_exists(["mask_head", "mask_predictor"])
+            
+            # Log statistics
+            trainable = [(n, p.numel()) for n, p in self.network.named_parameters() if p.requires_grad]
+            total_trainable = sum(x for _, x in trainable)
+            logging.info(f"\n[Stage B - Queries]")
+            logging.info(f"  Trainable parameters: {total_trainable:,}")
+            logging.info(f"  Train heads: {self.train_heads_in_stage_b}")
+            if trainable:
+                logging.info(f"  Examples: {[n for n, _ in trainable[:5]]}")
             return
 
         if stage == "C_lora":
+            # Stage C: LoRA adapters + optionally heads
             self.inject_lora_if_enabled()
-            # freeze again then unfreeze LoRA params
-            for p in self.network.parameters():
-                p.requires_grad = False
+            
+            # Unfreeze LoRA parameters
+            lora_count = 0
             for n, p in self.network.named_parameters():
                 if "lora_" in n:
                     p.requires_grad = True
+                    lora_count += 1
+            
+            if lora_count == 0:
+                logging.warning("⚠ No LoRA parameters found! Check LoRA injection.")
+            else:
+                logging.info(f"✓ Unfroze {lora_count} LoRA parameters")
+            
             if self.train_heads_in_stage_c:
-                self._unfreeze_if_exists(["class_head"])
-                self._unfreeze_if_exists(["mask_head"])
+                self._unfreeze_if_exists(["class_head", "class_predictor"])
+                self._unfreeze_if_exists(["mask_head", "mask_predictor"])
+            
+            # Log statistics
+            trainable = [(n, p.numel()) for n, p in self.network.named_parameters() if p.requires_grad]
+            total_trainable = sum(x for _, x in trainable)
+            lora_params = sum(x for n, x in trainable if "lora_" in n)
+            logging.info(f"\n[Stage C - LoRA]")
+            logging.info(f"  Total trainable parameters: {total_trainable:,}")
+            logging.info(f"  LoRA parameters: {lora_params:,}")
+            logging.info(f"  Train heads: {self.train_heads_in_stage_c}")
             return
 
-        raise ValueError(stage)
+        raise ValueError(f"Unknown finetune_stage: {stage}")
+
 
     def configure_optimizers(self):
         encoder_param_names = {
@@ -242,11 +336,24 @@ class LightningModule(lightning.LightningModule):
                     {"params": [param], "lr": lr, "name": name}
                 )
             else:
+
+                 # Higher LR for LoRA parameters (optional)
+                if "lora_" in name and self.finetune_stage == "C_lora":
+                    # You can scale LoRA lr if desired
+                    lora_lr_mult = self.lora.get("lr_mult", 1.0) if self.lora else 1.0
+                    lr = self.lr * lora_lr_mult
+
                 other_param_groups.append(
                     {"params": [param], "lr": self.lr, "name": name}
                 )
 
         param_groups = backbone_param_groups + other_param_groups
+
+        num_opt = sum(p.numel() for g in param_groups for p in g["params"])
+        num_trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        logging.info(f"[OPT CHECK] params_in_optimizer={num_opt:,}, trainable_params={num_trainable:,}")
+
+
         optimizer = AdamW(param_groups, weight_decay=self.weight_decay)
 
         scheduler = TwoStageWarmupPolySchedule(
@@ -771,13 +878,16 @@ class LightningModule(lightning.LightningModule):
         eps: float = 1e-6,
     ):
         """
-        mask_logits: [B, Q, H, W]  (raw mask logits)
-        class_logits: [B, Q, C+1]  (raw class logits)
+        Convert mask and class logits to per-pixel logits.
+        
+        Args:
+            mask_logits: [B, Q, H, W] raw mask logits
+            class_logits: [B, Q, C+1] raw class logits
+            use_logit_norm: whether to apply LogitNorm
+            eps: small constant for numerical stability
         """
-
         if use_logit_norm:
-            # normalize across classes (including no-object)
-            print("Using logit normalization")
+            # Normalize across classes (including no-object)
             norm = torch.norm(class_logits, p=2, dim=-1, keepdim=True)
             class_logits = class_logits / (norm + eps)
 
@@ -788,6 +898,7 @@ class LightningModule(lightning.LightningModule):
             mask_logits.sigmoid(),
             class_probs,
         )
+    
     @staticmethod
     @torch.compiler.disable
     def to_per_pixel_targets_semantic(

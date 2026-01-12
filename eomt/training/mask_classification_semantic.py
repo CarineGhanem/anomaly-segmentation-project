@@ -3,10 +3,10 @@
 # Licensed under the MIT License.
 # ---------------------------------------------------------------
 
-
 from typing import List, Optional
 import torch.nn as nn
 import torch.nn.functional as F
+import logging
 
 from training.mask_classification_loss import MaskClassificationLoss
 from training.lightning_module import LightningModule
@@ -41,7 +41,10 @@ class MaskClassificationSemantic(LightningModule):
         ckpt_path: Optional[str] = None,
         delta_weights: bool = False,
         load_ckpt_class_head: bool = True,
-        use_logit_norm : bool = True,
+        # LogitNorm parameters
+        use_logit_norm: bool = True,
+        logit_norm_temp: float = 0.1,
+        # Fine-tuning stage parameters
         finetune_stage: str = "full",
         lora: Optional[dict] = None,
         train_heads_in_stage_b: bool = True,
@@ -64,7 +67,6 @@ class MaskClassificationSemantic(LightningModule):
             ckpt_path=ckpt_path,
             delta_weights=delta_weights,
             load_ckpt_class_head=load_ckpt_class_head,
-            # NEW pass-through
             finetune_stage=finetune_stage,
             lora=lora,
             train_heads_in_stage_b=train_heads_in_stage_b,
@@ -79,6 +81,7 @@ class MaskClassificationSemantic(LightningModule):
         self.overlap_thresh = overlap_thresh
         self.stuff_classes = range(num_classes)
 
+        # Initialize criterion with LogitNorm support
         self.criterion = MaskClassificationLoss(
             num_points=num_points,
             oversample_ratio=oversample_ratio,
@@ -88,12 +91,23 @@ class MaskClassificationSemantic(LightningModule):
             class_coefficient=class_coefficient,
             num_labels=num_classes,
             no_object_coefficient=no_object_coefficient,
+            use_logit_norm=use_logit_norm,
+            logit_norm_temp=logit_norm_temp,
         )
         
-        #Logit norm option for semantic segmentation
+        # Store LogitNorm settings
         self.use_logit_norm = use_logit_norm
+        self.logit_norm_temp = logit_norm_temp
+        
+        logging.info(f"\n{'='*60}")
+        logging.info(f"LogitNorm Configuration:")
+        logging.info(f"  Enabled: {use_logit_norm}")
+        logging.info(f"  Temperature: {logit_norm_temp}")
+        logging.info(f"{'='*60}\n")
 
-        self.init_metrics_semantic(ignore_idx, self.network.num_blocks + 1 if self.network.masked_attn_enabled else 1)
+        # Initialize metrics
+        num_metric_blocks = self.network.num_blocks + 1 if self.network.masked_attn_enabled else 1
+        self.init_metrics_semantic(ignore_idx, num_metric_blocks)
 
     def eval_step(
         self,
@@ -101,6 +115,12 @@ class MaskClassificationSemantic(LightningModule):
         batch_idx=None,
         log_prefix=None,
     ):
+        """
+        Evaluation step for semantic segmentation.
+        
+        Note: LogitNorm is NOT applied during inference (use_logit_norm=False).
+        LogitNorm is only used during training for loss computation.
+        """
         imgs, targets = batch
 
         img_sizes = [img.shape[-2:] for img in imgs]
@@ -114,10 +134,12 @@ class MaskClassificationSemantic(LightningModule):
         ):
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
 
+            # Important: Do NOT apply LogitNorm during inference
+            # LogitNorm is only for training loss computation
             crop_logits = self.to_per_pixel_logits_semantic(
                 mask_logits,
                 class_logits,
-                use_logit_norm=(self.training and getattr(self, "use_logit_norm", False)),
+                use_logit_norm=False,  # Never use LogitNorm during inference
             )
             logits = self.revert_window_logits_semantic(crop_logits, origins, img_sizes)
 
@@ -129,7 +151,9 @@ class MaskClassificationSemantic(LightningModule):
                 )
 
     def on_validation_epoch_end(self):
+        """Called at the end of validation epoch."""
         self._on_eval_epoch_end_semantic("val")
 
     def on_validation_end(self):
+        """Called at the end of validation."""
         self._on_eval_end_semantic("val")
