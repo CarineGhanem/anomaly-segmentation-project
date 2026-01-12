@@ -140,6 +140,10 @@ class LightningCLI(cli.LightningCLI):
         )
 
     def fit(self, model, **kwargs):
+        # Log which stage is being used
+        if hasattr(model, 'finetune_stage'):
+            logging.info(f"Fine-tuning stage: {model.finetune_stage}")
+
         if hasattr(self.trainer.logger.experiment, "log_code"):
             is_gitignored = parse_gitignore(".gitignore")
             include_fn = lambda path: path.endswith(".py") or path.endswith(".yaml")
