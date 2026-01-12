@@ -4,13 +4,13 @@
 # ===============================================================
 
 trainer:
-  max_steps: 10000 # Reduced for Colab
+  max_epochs: 20  # Unified to 20 epochs
   precision: "16-mixed"
   accumulate_grad_batches: 8 # Higher accumulation for small batch
   gradient_clip_val: 0.01
   gradient_clip_algorithm: "norm"
   log_every_n_steps: 50
-  val_check_interval: 1000
+  check_val_every_n_epoch: 1  # Validate every epoch
   enable_model_summary: False
   devices: 1
 
@@ -24,8 +24,8 @@ trainer:
 model:
   class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:
-    # Smaller image size for Colab
-    img_size: [384, 768] # Reduced from [512, 1024]
+    # Image and class config
+    img_size: [1024, 1024]  # Match checkpoint size
     num_classes: 19
 
     # Attention mask annealing

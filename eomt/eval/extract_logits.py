@@ -255,7 +255,19 @@ def main():
     target_tf = Compose([Resize(img_size, Image.NEAREST)])
 
     # --- Determine dataset name for saving folder ---
-    dataset_name = args.input.split("/")[-3]
+    # Handle both Windows (\) and Unix (/) path separators
+    normalized_path = args.input.replace("\\", "/")
+    path_parts = normalized_path.split("/")
+    # Find dataset name (typically the folder name before 'images')
+    # Look for 'images' folder and get the parent directory name
+    if "images" in path_parts:
+        images_idx = path_parts.index("images")
+        if images_idx > 0:
+            dataset_name = path_parts[images_idx - 1]
+        else:
+            dataset_name = path_parts[-3] if len(path_parts) >= 3 else "dataset"
+    else:
+        dataset_name = path_parts[-3] if len(path_parts) >= 3 else "dataset"
     out_dir = os.path.join(args.save_dir, dataset_name)
     os.makedirs(out_dir, exist_ok=True)
 

@@ -4,13 +4,13 @@
 # ===============================================================
 
 trainer:
-  max_steps: 10000
+  max_epochs: 20  # Unified to 20 epochs
   precision: "16-mixed"
   accumulate_grad_batches: 4
   gradient_clip_val: 0.01
   gradient_clip_algorithm: "norm"
   log_every_n_steps: 50
-  val_check_interval: 1000
+  check_val_every_n_epoch: 1  # Validate every epoch
   enable_model_summary: False
   devices: 1
 
@@ -25,7 +25,7 @@ model:
   class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:
     # Image and class config
-    img_size: [512, 1024]
+    img_size: [1024, 1024]  # Match checkpoint size
     num_classes: 19
 
     # Attention mask annealing

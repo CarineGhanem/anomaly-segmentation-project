@@ -256,8 +256,8 @@ class MaskClassificationLoss(nn.Module):
                 self.dice_coefficient * cost_dice
             )
             
-            # Hungarian algorithm
-            src_idx, tgt_idx = linear_sum_assignment(cost.cpu())
+            # Hungarian algorithm (detach before converting to numpy)
+            src_idx, tgt_idx = linear_sum_assignment(cost.detach().cpu().numpy())
             indices.append((
                 torch.as_tensor(src_idx, dtype=torch.long, device=mask_logits.device),
                 torch.as_tensor(tgt_idx, dtype=torch.long, device=mask_logits.device)
