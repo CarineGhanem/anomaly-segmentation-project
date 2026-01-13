@@ -21,6 +21,18 @@ trainer:
       project: "eomt"
       name: "cs_eomt_ln_stageB_queries"
 
+  # Save best checkpoint based on validation mIoU
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: "outputs/stage_b"
+        filename: "best-{epoch:02d}-{metrics/val_iou_all:.4f}"
+        monitor: "metrics/val_iou_all"
+        mode: "max"
+        save_top_k: 1  # Save only the best model
+        save_last: True  # Also save last checkpoint
+        verbose: True
+
 model:
   class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:
