@@ -48,7 +48,14 @@ def create_transforms(img_size):
 def build_eomt_model(config, ckpt_path, device):
     """Build EoMT model from config and checkpoint"""
     print("Loading EoMT checkpoint:", ckpt_path)
-    state_dict = torch.load(ckpt_path, map_location=device, weights_only=True)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
+    
+    # Handle Lightning checkpoint format (contains "state_dict" key)
+    if "state_dict" in ckpt:
+        state_dict = ckpt["state_dict"]
+        print(f"Loaded Lightning checkpoint (epoch: {ckpt.get('epoch', 'N/A')}, step: {ckpt.get('global_step', 'N/A')})")
+    else:
+        state_dict = ckpt
 
     # Infer #classes from class_head
     num_classes = state_dict["network.class_head.weight"].shape[0]
@@ -141,7 +148,12 @@ def eomt_forward_predictions(model, img_tensor, device, target_size):
             mask_logits_layers[-1], size=(H, W), mode="bilinear", align_corners=False
         )
 
-        per_pixel = model.to_per_pixel_logits_semantic(mask_logits, class_logits_layers[-1])
+        # Important: Do NOT use LogitNorm during inference (standard practice from paper)
+        per_pixel = model.to_per_pixel_logits_semantic(
+            mask_logits, 
+            class_logits_layers[-1],
+            use_logit_norm=False,  # Never use LogitNorm during inference
+        )
         stitched = model.revert_window_logits_semantic(per_pixel, origins, img_sizes)
 
     # Get predictions: [C, H, W] -> [H, W]

@@ -1,0 +1,21 @@
+Dataset: RoadAnomaly21 | Method: rba | AUPRC: 51.50 | FPR@TPR95: 56.52
+Dataset: RoadAnomaly21 | Method: msp | AUPRC: 71.28 | FPR@TPR95: 59.09
+Dataset: RoadAnomaly21 | Method: max_logit | AUPRC: 70.97 | FPR@TPR95: 61.31
+Dataset: RoadAnomaly21 | Method: entropy | AUPRC: 74.82 | FPR@TPR95: 59.12
+Dataset: RoadObsticle21 | Method: rba | AUPRC: 54.38 | FPR@TPR95: 93.94
+Dataset: RoadObsticle21 | Method: msp | AUPRC: 91.38 | FPR@TPR95: 0.29
+Dataset: RoadObsticle21 | Method: max_logit | AUPRC: 91.34 | FPR@TPR95: 0.29
+Dataset: RoadObsticle21 | Method: entropy | AUPRC: 91.46 | FPR@TPR95: 0.29
+Dataset: FS_LostFound_full | Method: rba | AUPRC: 47.32 | FPR@TPR95: 65.62
+Dataset: FS_LostFound_full | Method: msp | AUPRC: 23.92 | FPR@TPR95: 14.83
+Dataset: FS_LostFound_full | Method: max_logit | AUPRC: 24.00 | FPR@TPR95: 14.57
+Dataset: FS_LostFound_full | Method: entropy | AUPRC: 26.88 | FPR@TPR95: 14.72
+Dataset: fs_static | Method: rba | AUPRC: 64.46 | FPR@TPR95: 90.14
+Dataset: fs_static | Method: msp | AUPRC: 37.96 | FPR@TPR95: 41.50
+Dataset: fs_static | Method: max_logit | AUPRC: 37.98 | FPR@TPR95: 47.53
+Dataset: fs_static | Method: entropy | AUPRC: 34.18 | FPR@TPR95: 41.45
+Dataset: RoadAnomaly | Method: rba | AUPRC: 66.00 | FPR@TPR95: 58.64
+Dataset: RoadAnomaly | Method: msp | AUPRC: 74.65 | FPR@TPR95: 22.70
+Dataset: RoadAnomaly | Method: max_logit | AUPRC: 74.42 | FPR@TPR95: 22.27
+Dataset: RoadAnomaly | Method: entropy | AUPRC: 77.95 | FPR@TPR95: 22.13
+Model: EOMT | mIoU: 77.55

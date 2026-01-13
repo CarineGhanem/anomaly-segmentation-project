@@ -35,7 +35,7 @@ model:
 
     # LogitNorm settings
     use_logit_norm: True
-    logit_norm_temp: 0.1
+    logit_norm_temp: 0.5  # Increased from 0.1 to reduce distribution shift
 
     # Stage control (FLAT keys)
     finetune_stage: "C_lora"

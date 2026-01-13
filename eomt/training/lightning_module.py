@@ -875,6 +875,7 @@ class LightningModule(lightning.LightningModule):
         mask_logits: torch.Tensor,
         class_logits: torch.Tensor,
         use_logit_norm: bool = False,
+        logit_norm_temp: float = 0.1,
         eps: float = 1e-6,
     ):
         """
@@ -884,12 +885,13 @@ class LightningModule(lightning.LightningModule):
             mask_logits: [B, Q, H, W] raw mask logits
             class_logits: [B, Q, C+1] raw class logits
             use_logit_norm: whether to apply LogitNorm
+            logit_norm_temp: temperature parameter for LogitNorm (default 0.1)
             eps: small constant for numerical stability
         """
         if use_logit_norm:
-            # Normalize across classes (including no-object)
+            # Normalize across classes (including no-object) and scale by temperature
             norm = torch.norm(class_logits, p=2, dim=-1, keepdim=True)
-            class_logits = class_logits / (norm + eps)
+            class_logits = class_logits / (norm + eps) / logit_norm_temp
 
         class_probs = class_logits.softmax(dim=-1)[..., :-1]
 

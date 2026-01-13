@@ -35,7 +35,7 @@ model:
 
     # LogitNorm settings
     use_logit_norm: True
-    logit_norm_temp: 0.1
+    logit_norm_temp: 0.5  # Increased from 0.1 to reduce distribution shift
 
     # Stage control (FLAT keys)
     finetune_stage: "B_queries"
@@ -48,7 +48,7 @@ model:
     load_ckpt_class_head: True # Load trained heads from Stage A
 
     # Optimizer control (FLAT keys) - Higher LR for queries
-    lr: 0.001 # 1e-3 for queries (they're small)
+    lr: 0.0005 # 1e-3 for queries (they're small)
     weight_decay: 0.01
     llrd: 0.8
     llrd_l2_enabled: True

@@ -92,7 +92,14 @@ def remap_gt_mask(mask, pathGT):
 # ============================================================
 def build_eomt_model(config, ckpt_path, device):
     print("Loading EoMT checkpoint:", ckpt_path)
-    state_dict = torch.load(ckpt_path, map_location=device, weights_only=True)
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
+    
+    # Handle Lightning checkpoint format (contains "state_dict" key)
+    if "state_dict" in ckpt:
+        state_dict = ckpt["state_dict"]
+        print(f"Loaded Lightning checkpoint (epoch: {ckpt.get('epoch', 'N/A')}, step: {ckpt.get('global_step', 'N/A')})")
+    else:
+        state_dict = ckpt
 
     # --- Infer #classes from class_head ----
     num_classes = state_dict["network.class_head.weight"].shape[0]
@@ -125,6 +132,9 @@ def build_eomt_model(config, ckpt_path, device):
     lit_mod, lit_cls = config["model"]["class_path"].rsplit(".", 1)
     Lit = getattr(importlib.import_module(lit_mod), lit_cls)
     model_kwargs = {k: v for k, v in config["model"]["init_args"].items() if k != "network"}
+    # Remove img_size and num_classes from model_kwargs to avoid duplicate arguments
+    model_kwargs.pop("img_size", None)
+    model_kwargs.pop("num_classes", None)
 
     model = Lit(
         img_size=img_size,
@@ -193,7 +203,13 @@ def eomt_forward_logits(model, img_tensor, device):
         )
 
         # ---- Standard per-pixel semantic logits ----
-        per_pixel = model.to_per_pixel_logits_semantic(mask_logits_up, class_logits_last)
+        # Important: Do NOT use LogitNorm during inference (standard practice from paper)
+        # LogitNorm is only for training loss computation
+        per_pixel = model.to_per_pixel_logits_semantic(
+            mask_logits_up, 
+            class_logits_last,
+            use_logit_norm=False,  # Never use LogitNorm during inference
+        )
         stitched = model.revert_window_logits_semantic(per_pixel, origins, img_sizes)
         pixel_logits = stitched[0]  # [C, H, W]
 
