@@ -60,7 +60,7 @@ model:
     load_ckpt_class_head: False # Re-initialize heads
 
     # Optimizer control (FLAT keys) - Higher LR for head-only
-    lr: 0.0003 # Slightly higher LR to compensate for gentler temp=0.15
+    lr: 0.0005 # Slightly higher LR to compensate for gentler temp=0.15
     weight_decay: 0.01
     llrd: 0.8
     llrd_l2_enabled: True
