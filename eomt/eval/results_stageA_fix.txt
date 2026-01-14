@@ -1,1 +1,0 @@
-Model: EOMT | mIoU: 77.41

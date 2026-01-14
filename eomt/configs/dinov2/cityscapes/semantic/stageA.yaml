@@ -47,7 +47,7 @@ model:
 
     # LogitNorm settings
     use_logit_norm: True
-    logit_norm_temp: 0.3  # Gentle temperature for FS_LostFound_full/fs_static compatibility
+    logit_norm_temp: 0.5  # Gentle temperature for FS_LostFound_full/fs_static compatibility
 
     # Stage control (FLAT keys)
     finetune_stage: "A_head"
@@ -60,7 +60,7 @@ model:
     load_ckpt_class_head: False # Re-initialize heads
 
     # Optimizer control (FLAT keys) - Higher LR for head-only
-    lr: 0.0001 # Slightly higher LR to compensate for gentler temp=0.15
+    lr: 0.0003 # Slightly higher LR to compensate for gentler temp=0.15
     weight_decay: 0.01
     llrd: 0.8
     llrd_l2_enabled: True
