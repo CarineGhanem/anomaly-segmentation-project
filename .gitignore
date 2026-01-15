@@ -227,3 +227,7 @@ Validation_Dataset/
 
 #saved logits archives
 *.zip
+
+
+trained_models/
+*.ckpt
