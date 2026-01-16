@@ -13,6 +13,9 @@ trainer:
   check_val_every_n_epoch: 1  # Validate every epoch
   enable_model_summary: False
   devices: 1
+  callbacks:
+    - class_path: training.live_plot_callback.LivePlotCallback
+    - class_path: training.simple_progress_callback.SimpleProgressCallback
 
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
