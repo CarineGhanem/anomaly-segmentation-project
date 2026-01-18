@@ -2,14 +2,25 @@
 
 trainer:
   max_epochs: 20
-  precision: "16-mixed"
-  accumulate_grad_batches: 8 # Can reduce to 8 now (fewer params)
-  gradient_clip_val: 0.01
+
+  # --- TPU optimization ---
+  accelerator: "tpu"
+  devices: 8
+  strategy: "xla"
+  precision: "bf16-mixed"
+
+  # Effective batch sizing:
+  # per-device batch (2) * devices (8) = global 16
+  # global 16 * accumulate (4) = effective 64
+  accumulate_grad_batches: 4
+
+  # Clip was far too small; 1.0 is a common safe default
+  gradient_clip_val: 1.0
   gradient_clip_algorithm: "norm"
-  log_every_n_steps: 50
-  check_val_every_n_epoch: 1 # Validate every epoch
+
+  log_every_n_steps: 20
+  check_val_every_n_epoch: 1
   enable_model_summary: False
-  devices: 1
 
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
@@ -26,9 +37,10 @@ model:
     num_classes: 19
 
     # Attention mask annealing
+    # Adjusted for ~3720 total steps (Cityscapes 2975 / global batch 16 ≈ 186 steps/epoch; * 20 ≈ 3720)
     attn_mask_annealing_enabled: True
-    attn_mask_annealing_start_steps: [3317, 8292, 13268]
-    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+    attn_mask_annealing_start_steps: [0, 1240, 2480]
+    attn_mask_annealing_end_steps: [1240, 2480, 3720]
 
     # LogitNorm settings
     use_logit_norm: True
@@ -44,14 +56,19 @@ model:
     delta_weights: False
     load_ckpt_class_head: False # Re-initialize class head only
 
-    # Optimizer control - Can use higher LR now (fewer params)
-    lr: 0.001 # Or try 0.003
+    # Optimizer control
+    lr: 0.001 # (0.003 could be tried later, but start here)
     weight_decay: 0.01
-    llrd: 0.8
-    llrd_l2_enabled: True
+
+    # LLRD isn't useful for true class-only; keep neutral + disable extra L2 logic
+    llrd: 1.0
+    llrd_l2_enabled: False
+
     lr_mult: 1.0
     poly_power: 0.9
-    warmup_steps: [100, 200]
+
+    # Warmup: use a single value (scaled to total steps)
+    warmup_steps: 180
 
     # Loss coefficients
     mask_coefficient: 5.0
@@ -92,5 +109,6 @@ model:
 data:
   class_path: datasets.cityscapes_semantic.CityscapesSemantic
   init_args:
-    batch_size: 8 # Can increase now (less memory)
+    # TPU: batch_size is PER DEVICE; keep small to avoid OOM and keep effective batch stable
+    batch_size: 2
     num_workers: 8
