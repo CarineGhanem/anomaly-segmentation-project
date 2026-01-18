@@ -1,20 +1,17 @@
-# configs/ablation_ln_stageA_classonly.yaml
+# configs/ablation_ln_stageA_classonly_20ep_A100_bs4_acc8.yaml
 
 trainer:
-  max_epochs: 20
+  max_epochs: 10
 
-  # --- TPU optimization ---
-  accelerator: "tpu"
-  devices: 8
-  strategy: "xla"
-  precision: "bf16-mixed"
+  # --- GPU (A100) setup ---
+  accelerator: "gpu"
+  devices: 1
+  strategy: "auto"
+  precision: "16-mixed"
 
-  # Effective batch sizing:
-  # per-device batch (2) * devices (8) = global 16
-  # global 16 * accumulate (4) = effective 64
-  accumulate_grad_batches: 4
+  # Effective batch = 4 * 8 = 32
+  accumulate_grad_batches: 8
 
-  # Clip was far too small; 1.0 is a common safe default
   gradient_clip_val: 1.0
   gradient_clip_algorithm: "norm"
 
@@ -22,12 +19,15 @@ trainer:
   check_val_every_n_epoch: 1
   enable_model_summary: False
 
+  # Full validation for the real run
+  limit_val_batches: 1.0
+
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
       resume: allow
       project: "eomt"
-      name: "cs_eomt_ln_stageA_classonly"
+      name: "cs_eomt_ln_stageA_classonly_A100_bs4_acc8_10ep_lr0005"
 
 model:
   class_path: training.mask_classification_semantic.MaskClassificationSemantic
@@ -37,38 +37,38 @@ model:
     num_classes: 19
 
     # Attention mask annealing
-    # Adjusted for ~3720 total steps (Cityscapes 2975 / global batch 16 ≈ 186 steps/epoch; * 20 ≈ 3720)
+    # Scaled for ~14880 total steps (batch 4 -> ~744 steps/epoch; *20 -> ~14880)
     attn_mask_annealing_enabled: True
-    attn_mask_annealing_start_steps: [0, 1240, 2480]
-    attn_mask_annealing_end_steps: [1240, 2480, 3720]
+    attn_mask_annealing_start_steps: [0, 4960, 9920]
+    attn_mask_annealing_end_steps:   [4960, 9920, 14880]
 
     # LogitNorm settings
     use_logit_norm: True
-    logit_norm_temp: 0.5 # Your current best
+    logit_norm_temp: 0.3
 
     # Stage control
-    finetune_stage: "A_class_only" # NEW: Only class head
+    finetune_stage: "A_class_only"
     train_heads_in_stage_b: True
     train_heads_in_stage_c: True
 
     # Checkpoint loading
     ckpt_path: "/content/drive/MyDrive/eomt_cityscapes.bin"
     delta_weights: False
-    load_ckpt_class_head: False # Re-initialize class head only
+    load_ckpt_class_head: False
 
     # Optimizer control
-    lr: 0.001 # (0.003 could be tried later, but start here)
+    lr: lr: 0.0005
     weight_decay: 0.01
 
-    # LLRD isn't useful for true class-only; keep neutral + disable extra L2 logic
     llrd: 1.0
     llrd_l2_enabled: False
 
     lr_mult: 1.0
     poly_power: 0.9
 
-    # Warmup: use a single value (scaled to total steps)
-    warmup_steps: 180
+    # Warmup scaled for the longer run; keep list type
+    # Roughly ~2% and ~4% of total steps
+    warmup_steps: [300, 600]
 
     # Loss coefficients
     mask_coefficient: 5.0
@@ -109,6 +109,5 @@ model:
 data:
   class_path: datasets.cityscapes_semantic.CityscapesSemantic
   init_args:
-    # TPU: batch_size is PER DEVICE; keep small to avoid OOM and keep effective batch stable
-    batch_size: 2
+    batch_size: 4
     num_workers: 8
