@@ -1,0 +1,96 @@
+# configs/ablation_ln_stageA_classonly.yaml
+
+trainer:
+  max_epochs: 20
+  precision: "16-mixed"
+  accumulate_grad_batches: 8 # Can reduce to 8 now (fewer params)
+  gradient_clip_val: 0.01
+  gradient_clip_algorithm: "norm"
+  log_every_n_steps: 50
+  check_val_every_n_epoch: 1 # Validate every epoch
+  enable_model_summary: False
+  devices: 1
+
+  logger:
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
+    init_args:
+      resume: allow
+      project: "eomt"
+      name: "cs_eomt_ln_stageA_classonly"
+
+model:
+  class_path: training.mask_classification_semantic.MaskClassificationSemantic
+  init_args:
+    # Image and class config
+    img_size: [1024, 1024]
+    num_classes: 19
+
+    # Attention mask annealing
+    attn_mask_annealing_enabled: True
+    attn_mask_annealing_start_steps: [3317, 8292, 13268]
+    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+
+    # LogitNorm settings
+    use_logit_norm: True
+    logit_norm_temp: 0.5 # Your current best
+
+    # Stage control
+    finetune_stage: "A_class_only" # NEW: Only class head
+    train_heads_in_stage_b: True
+    train_heads_in_stage_c: True
+
+    # Checkpoint loading
+    ckpt_path: "/content/drive/MyDrive/eomt_cityscapes.bin"
+    delta_weights: False
+    load_ckpt_class_head: False # Re-initialize class head only
+
+    # Optimizer control - Can use higher LR now (fewer params)
+    lr: 0.001 # Or try 0.003
+    weight_decay: 0.01
+    llrd: 0.8
+    llrd_l2_enabled: True
+    lr_mult: 1.0
+    poly_power: 0.9
+    warmup_steps: [100, 200]
+
+    # Loss coefficients
+    mask_coefficient: 5.0
+    dice_coefficient: 5.0
+    class_coefficient: 2.0
+    no_object_coefficient: 0.1
+    mask_thresh: 0.8
+    overlap_thresh: 0.8
+
+    # Sampling for loss
+    num_points: 12544
+    oversample_ratio: 3.0
+    importance_sample_ratio: 0.75
+
+    # Semantic specific
+    ignore_idx: 255
+
+    # LoRA config (disabled for Stage A)
+    lora:
+      enabled: False
+      rank: 4
+      alpha: 16
+      dropout: 0.0
+      target_modules: ["q_proj", "v_proj"]
+      last_n_blocks: 2
+
+    # Network architecture
+    network:
+      class_path: models.eomt.EoMT
+      init_args:
+        num_q: 100
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name: vit_base_patch14_reg4_dinov2
+
+data:
+  class_path: datasets.cityscapes_semantic.CityscapesSemantic
+  init_args:
+    batch_size: 8 # Can increase now (less memory)
+    num_workers: 8

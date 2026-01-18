@@ -221,6 +221,20 @@ class LightningModule(lightning.LightningModule):
             logging.info(f"✓ Full training mode - all {trainable:,} parameters unfrozen")
             return
 
+        if stage == "A_class_only":  # NEW STAGE
+            # Stage A variant: Only class head
+            self._unfreeze_if_exists(["class_head", "class_predictor"])
+            # Note: mask_head stays FROZEN
+            
+            trainable = [(n, p.numel()) for n, p in self.network.named_parameters() if p.requires_grad]
+            total_trainable = sum(x for _, x in trainable)
+            logging.info(f"\n[Stage A - Class Head Only]")
+            logging.info(f"  Trainable parameters: {total_trainable:,}")
+            logging.info(f"  Trainable tensors: {len(trainable)}")
+            if trainable:
+                logging.info(f"  Examples: {[n for n, _ in trainable[:5]]}")
+            return
+
         if stage == "A_head":
             # Stage A: Only class and mask heads
             self._unfreeze_if_exists(["class_head", "class_predictor"])
