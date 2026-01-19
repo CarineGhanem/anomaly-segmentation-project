@@ -203,7 +203,8 @@ class MaskClassificationLoss(nn.Module):
         
         # Flatten batch dimension for matching
         class_logits_flat = class_logits_norm.flatten(0, 1)  # [B*Q, C+1]
-        mask_logits_flat = mask_logits.flatten(0, 1)  # [B*Q, H, W]
+       
+        mask_logits_flat = mask_logits.detach().flatten(0, 1)  # [B*Q, H, W]
         
         indices = []
         
@@ -227,6 +228,7 @@ class MaskClassificationLoss(nn.Module):
             cost_class = -out_prob[:, tgt_ids]  # [Q, num_gt]
             
             # Mask costs (using sampled points for efficiency)
+            
             with torch.no_grad():
                 # Sample points for cost computation
                 point_coords = torch.rand(
@@ -289,6 +291,10 @@ class MaskClassificationLoss(nn.Module):
                 mode="bilinear",
                 align_corners=False
             )
+        
+       
+        if not masks_queries_logits.requires_grad:
+            masks_queries_logits = masks_queries_logits.detach()
         
         # Hungarian matching
         indices = self.hungarian_matching(
