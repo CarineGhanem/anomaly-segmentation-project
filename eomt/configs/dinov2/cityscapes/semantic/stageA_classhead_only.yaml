@@ -40,7 +40,7 @@ model:
     # Scaled for ~14880 total steps (batch 4 -> ~744 steps/epoch; *20 -> ~14880)
     attn_mask_annealing_enabled: True
     attn_mask_annealing_start_steps: [0, 4960, 9920]
-    attn_mask_annealing_end_steps:   [4960, 9920, 14880]
+    attn_mask_annealing_end_steps: [4960, 9920, 14880]
 
     # LogitNorm settings
     use_logit_norm: True
@@ -57,7 +57,7 @@ model:
     load_ckpt_class_head: False
 
     # Optimizer control
-    lr: lr: 0.0005
+    lr: 0.0005
     weight_decay: 0.01
 
     llrd: 1.0
