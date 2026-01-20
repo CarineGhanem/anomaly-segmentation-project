@@ -4,19 +4,15 @@
 # ===============================================================
 
 trainer:
-  max_epochs: 20  # Increased for better convergence, especially for difficult datasets
+  max_epochs: 20 # Increased for better convergence, especially for difficult datasets
   precision: "16-mixed"
   accumulate_grad_batches: 8
   gradient_clip_val: 0.01
   gradient_clip_algorithm: "norm"
   log_every_n_steps: 50
-  check_val_every_n_epoch: 1  # Validate every epoch
+  check_val_every_n_epoch: 1 # Validate every epoch
   enable_model_summary: False
   devices: 1
-  callbacks:
-    - class_path: training.live_plot_callback.LivePlotCallback
-    - class_path: training.simple_progress_callback.SimpleProgressCallback
-
 
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
@@ -27,21 +23,25 @@ trainer:
 
   # Save best checkpoint based on validation mIoU
   callbacks:
+    - class_path: training.visualization_callback.RealtimeVisualizationCallback,
+      init_args:
+        update_every_n_epochs: 1 # Update plot every epoch
+
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         dirpath: "outputs/stage_a"
         filename: "best-{epoch:02d}-{metrics/val_iou_all:.4f}"
         monitor: "metrics/val_iou_all"
         mode: "max"
-        save_top_k: 1  # Save only the best model
-        save_last: False  # Only save best model, not last checkpoint
+        save_top_k: 1
+        save_last: False
         verbose: True
 
 model:
   class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:
     # Image and class config
-    img_size: [1024, 1024]  # Match checkpoint size
+    img_size: [512, 512] # Match checkpoint size
     num_classes: 19
 
     # Attention mask annealing
@@ -51,7 +51,7 @@ model:
 
     # LogitNorm settings
     use_logit_norm: True
-    logit_norm_temp: 0.5  # Gentle temperature for FS_LostFound_full/fs_static compatibility
+    logit_norm_temp: 0.5 # Gentle temperature for FS_LostFound_full/fs_static compatibility
 
     # Stage control (FLAT keys)
     finetune_stage: "A_head"
@@ -75,8 +75,8 @@ model:
     # Loss coefficients - Adjusted for better anomaly detection
     mask_coefficient: 5.0
     dice_coefficient: 5.0
-    class_coefficient: 3.0  # Increased from 2.0 to strengthen classification confidence
-    no_object_coefficient: 0.15  # Increased from 0.1 to better distinguish background/anomaly
+    class_coefficient: 3.0 # Increased from 2.0 to strengthen classification confidence
+    no_object_coefficient: 0.15 # Increased from 0.1 to better distinguish background/anomaly
     mask_thresh: 0.8
     overlap_thresh: 0.8
 
