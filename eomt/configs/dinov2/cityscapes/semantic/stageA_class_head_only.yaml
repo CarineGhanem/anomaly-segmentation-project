@@ -23,10 +23,11 @@ trainer:
   limit_val_batches: 1.0
 
   logger:
-    class_path: lightning.pytorch.loggers.CSVLogger
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
-      save_dir: "training_logs"
-      name: "stage_a_class_head_only"
+      resume: allow
+      project: "eomt"
+      name: "cs_eomt_ln_stageA_classonly_A100_bs4_acc8_10ep_lr0005"
 
   callbacks:
     - class_path: training.live_plot_callback.LivePlotCallback

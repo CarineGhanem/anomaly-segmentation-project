@@ -17,7 +17,7 @@ from lightning.pytorch import cli
 from lightning.pytorch.callbacks import ModelSummary, LearningRateMonitor
 from lightning.pytorch.loops.training_epoch_loop import _TrainingEpochLoop
 from lightning.pytorch.loops.fetchers import _DataFetcher, _DataLoaderIterDataFetcher
-from lightning.pytorch.loggers import WandbLogger
+
 from training.lightning_module import LightningModule
 from datasets.lightning_data_module import LightningDataModule
 
@@ -141,16 +141,13 @@ class LightningCLI(cli.LightningCLI):
 
     def fit(self, model, **kwargs):
         # Log which stage is being used
-        if hasattr(model, "finetune_stage"):
+        if hasattr(model, 'finetune_stage'):
             logging.info(f"Fine-tuning stage: {model.finetune_stage}")
 
-        # Only WandbLogger supports log_code in this way
-        logger = getattr(self.trainer, "logger", None)
-        if isinstance(logger, WandbLogger):
+        if hasattr(self.trainer.logger.experiment, "log_code"):
             is_gitignored = parse_gitignore(".gitignore")
             include_fn = lambda path: path.endswith(".py") or path.endswith(".yaml")
-            # W&B API
-            logger.experiment.log_code(
+            self.trainer.logger.experiment.log_code(
                 ".", include_fn=include_fn, exclude_fn=is_gitignored
             )
 

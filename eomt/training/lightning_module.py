@@ -33,9 +33,8 @@ import numpy as np
 from torch.nn.functional import interpolate
 from torchvision.transforms.v2.functional import pad
 import logging
-from lightning.pytorch.loggers import WandbLogger
+
 from training.two_stage_warmup_poly_schedule import TwoStageWarmupPolySchedule
-from pathlib import Path
 
 bold_green = "\033[1;32m"
 reset = "\033[0m"
@@ -791,18 +790,20 @@ class LightningModule(lightning.LightningModule):
         )
         axes[1].axis("off")
 
-        axes[2].imshow(
-            np.digitize(preds, unique_classes, right=True),
-            cmap=custom_cmap,
-            norm=norm,
-            interpolation="nearest",
-        )
-        axes[2].axis("off")
+        if preds is not None:
+            axes[2].imshow(
+                np.digitize(preds, unique_classes, right=True),
+                cmap=custom_cmap,
+                norm=norm,
+                interpolation="nearest",
+            )
+            axes[2].axis("off")
 
         patches = [
             Line2D([0], [0], color=colors[i], lw=4, label=str(unique_classes[i]))
             for i in range(num_classes)
         ]
+
         fig.legend(handles=patches, loc="upper left")
 
         buf = io.BytesIO()
@@ -813,35 +814,7 @@ class LightningModule(lightning.LightningModule):
 
         block_postfix = self.block_postfix(block_idx)
         name = f"{log_prefix}_pred_{batch_idx}{block_postfix}"
-
-        # ---- FIX: logger-safe logging ----
-        logger = getattr(self.trainer, "logger", None)
-
-        # Case 1: W&B -> log image to W&B
-        if isinstance(logger, WandbLogger):
-            import wandb
-            logger.experiment.log(
-                {name: wandb.Image(Image.open(buf))},
-                step=getattr(self, "global_step", None),
-            )
-            return
-
-        # Case 2: non-W&B -> save image to disk (CSVLogger, TensorBoardLogger, etc.)
-        # Prefer logger.log_dir when available; otherwise fall back to a local folder.
-        log_dir = getattr(logger, "log_dir", None) if logger is not None else None
-        if log_dir is None:
-            log_dir = "training_logs"  # fallback
-
-        out_dir = Path(log_dir) / "visualizations" / log_prefix
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        out_path = out_dir / f"{name}_epoch{self.current_epoch:03d}_step{self.global_step:06d}.png"
-        Image.open(buf).save(out_path)
-
-        # Optional: write an index file for easy post-run parsing
-        index_path = out_dir / "paths.txt"
-        with open(index_path, "a") as f:
-            f.write(str(out_path) + "\n")
+        self.trainer.logger.experiment.log({name: [wandb.Image(Image.open(buf))]})
 
     @torch.compiler.disable
     def scale_img_size_semantic(self, size: tuple[int, int]):
