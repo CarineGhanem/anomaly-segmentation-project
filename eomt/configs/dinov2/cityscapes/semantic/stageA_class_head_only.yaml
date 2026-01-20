@@ -29,10 +29,6 @@ trainer:
       project: "eomt"
       name: "cs_eomt_ln_stageA_classonly_A100_bs4_acc8_10ep_lr0005"
 
-  callbacks:
-    - class_path: training.live_plot_callback.LivePlotCallback
-    - class_path: training.simple_progress_callback.SimpleProgressCallback
-
 model:
   class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:

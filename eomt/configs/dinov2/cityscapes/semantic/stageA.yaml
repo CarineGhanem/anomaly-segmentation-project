@@ -23,10 +23,6 @@ trainer:
 
   # Save best checkpoint based on validation mIoU
   callbacks:
-    - class_path: training.visualization_callback.RealtimeVisualizationCallback,
-      init_args:
-        update_every_n_epochs: 1 # Update plot every epoch
-
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         dirpath: "outputs/stage_a"
