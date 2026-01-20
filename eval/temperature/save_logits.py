@@ -6,6 +6,9 @@ import random
 import pickle
 from PIL import Image
 import numpy as np
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from erfnet import ERFNet
 from argparse import ArgumentParser
 from torchvision.transforms import Compose, Resize, ToTensor

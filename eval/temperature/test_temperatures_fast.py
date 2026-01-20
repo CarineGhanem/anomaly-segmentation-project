@@ -5,7 +5,8 @@ import numpy as np
 import torch
 from argparse import ArgumentParser
 from sklearn.metrics import average_precision_score
-from ood_metrics import fpr_at_95_tpr
+from ood_metrics.metrics import fpr_at_95_tpr
+
 
 
 def compute_anomaly_score(logits, temperature, method='msp'):
