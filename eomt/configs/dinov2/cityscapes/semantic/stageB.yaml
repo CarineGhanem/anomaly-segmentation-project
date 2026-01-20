@@ -4,19 +4,15 @@
 # ===============================================================
 
 trainer:
-  max_epochs: 20  # Unified to 20 epochs
+  max_epochs: 20 # Unified to 20 epochs
   precision: "16-mixed"
   accumulate_grad_batches: 4
   gradient_clip_val: 0.01
   gradient_clip_algorithm: "norm"
   log_every_n_steps: 50
-  check_val_every_n_epoch: 1  # Validate every epoch
+  check_val_every_n_epoch: 1 # Validate every epoch
   enable_model_summary: False
   devices: 1
-  callbacks:
-    - class_path: training.live_plot_callback.LivePlotCallback
-    - class_path: training.simple_progress_callback.SimpleProgressCallback
-
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
@@ -32,15 +28,15 @@ trainer:
         filename: "best-{epoch:02d}-{metrics/val_iou_all:.4f}"
         monitor: "metrics/val_iou_all"
         mode: "max"
-        save_top_k: 1  # Save only the best model
-        save_last: True  # Also save last checkpoint
+        save_top_k: 1 # Save only the best model
+        save_last: True # Also save last checkpoint
         verbose: True
 
 model:
   class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:
     # Image and class config
-    img_size: [1024, 1024]  # Match checkpoint size
+    img_size: [1024, 1024] # Match checkpoint size
     num_classes: 19
 
     # Attention mask annealing
@@ -50,7 +46,7 @@ model:
 
     # LogitNorm settings
     use_logit_norm: True
-    logit_norm_temp: 0.1  # Increased from 0.1 to reduce distribution shift
+    logit_norm_temp: 0.1 # Increased from 0.1 to reduce distribution shift
 
     # Stage control (FLAT keys)
     finetune_stage: "B_queries"
