@@ -48,7 +48,7 @@ model:
 
     # LogitNorm settings
     use_logit_norm: True
-    logit_norm_temp: 0.3
+    logit_norm_temp: 0.5
 
     # Stage control
     finetune_stage: "A_class_only"
