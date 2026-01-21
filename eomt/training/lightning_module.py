@@ -358,7 +358,7 @@ class LightningModule(lightning.LightningModule):
                     lr = self.lr * lora_lr_mult
 
                 other_param_groups.append(
-                    {"params": [param], "lr": self.lr, "name": name}
+                    {"params": [param], "lr": lr, "name": name}
                 )
 
         param_groups = backbone_param_groups + other_param_groups
