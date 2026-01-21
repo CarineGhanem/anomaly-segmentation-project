@@ -90,7 +90,7 @@ model:
       rank: 4 # Smaller rank for speed
       alpha: 16
       dropout: 0.0 # No dropout for simplicity
-      target_modules: ["q_proj", "v_proj"] # Only Q and V
+      target_modules: ["attn.qkv", "attn.proj"] # QKV combined and output projection
       last_n_blocks: 2 # Only last 2 blocks
       lr_mult: 1.0
 
