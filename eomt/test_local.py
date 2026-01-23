@@ -182,6 +182,7 @@ def test_logit_norm():
         no_object_coefficient=0.1,
         use_logit_norm=True,
         logit_norm_temp=0.1,
+        logit_norm_mode="both",
     )
     
     # Create dummy logits
@@ -192,7 +193,7 @@ def test_logit_norm():
     logger.info(f"Input class logits norm (per query): {class_logits.norm(dim=-1).mean().item():.4f}")
     
     # Apply LogitNorm
-    normalized = criterion.apply_logit_norm(class_logits)
+    normalized = criterion.apply_logit_norm(class_logits, context="both")
     
     logger.info(f"\nNormalized logits shape: {normalized.shape}")
     logger.info(f"Normalized logits norm (per query): {normalized.norm(dim=-1).mean().item():.4f}")

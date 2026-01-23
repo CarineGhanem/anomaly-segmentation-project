@@ -29,6 +29,7 @@ class MaskClassificationLoss(nn.Module):
         no_object_coefficient: float,
         use_logit_norm: bool = False,
         logit_norm_temp: float = 0.1,
+        logit_norm_mode: str = "both",   # <--- NEW
     ):
         super().__init__()
         
@@ -43,33 +44,52 @@ class MaskClassificationLoss(nn.Module):
         # LogitNorm parameters
         self.use_logit_norm = use_logit_norm
         self.logit_norm_temp = logit_norm_temp
+
+        # NEW: controls where to apply LogitNorm
+        allowed = {"none", "ce", "matching", "both"}
+        if logit_norm_mode not in allowed:
+            raise ValueError(f"logit_norm_mode must be one of {allowed}, got {logit_norm_mode}")
+        self.logit_norm_mode = logit_norm_mode
         
         # Class weights with no-object class
         empty_weight = torch.ones(num_labels + 1)
         empty_weight[-1] = no_object_coefficient
         self.register_buffer("empty_weight", empty_weight)
 
-    def apply_logit_norm(self, class_logits: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    def apply_logit_norm(
+        self,
+        class_logits: torch.Tensor,
+        *,
+        context: str,          # "ce" or "matching"
+        eps: float = 1e-6
+    ) -> torch.Tensor:
         """
-        Apply LogitNorm to class logits.
-        
+        Apply LogitNorm depending on mode + context.
+
         Args:
-            class_logits: [B, Q, C+1] raw class logits
-            eps: small constant for numerical stability
-            
-        Returns:
-            normalized_logits: [B, Q, C+1] normalized logits scaled by temperature
+            class_logits: [B, Q, C+1] raw logits
+            context: "ce" or "matching"
         """
         if not self.use_logit_norm:
             return class_logits
-        
-        # Compute L2 norm across class dimension (including no-object class)
+
+        mode = self.logit_norm_mode
+        if mode == "none":
+            return class_logits
+        if mode == "both":
+            apply = True
+        elif mode == "ce":
+            apply = (context == "ce")
+        elif mode == "matching":
+            apply = (context == "matching")
+        else:
+            apply = False  # should never happen due to validation
+
+        if not apply:
+            return class_logits
+
         norm = torch.norm(class_logits, p=2, dim=-1, keepdim=True)
-        
-        # Normalize and scale by temperature
-        normalized_logits = class_logits / (norm + eps) / self.logit_norm_temp
-        
-        return normalized_logits
+        return class_logits / (norm + eps) / self.logit_norm_temp
 
     def point_sample(self, input, point_coords, **kwargs):
         """Sample features at point coordinates."""
@@ -198,8 +218,9 @@ class MaskClassificationLoss(nn.Module):
         """Perform Hungarian matching between predictions and ground truth."""
         B, Q = class_logits.shape[:2]
         
-        # Apply LogitNorm before matching
-        class_logits_norm = self.apply_logit_norm(class_logits)
+         # Apply LogitNorm before matching (if enabled by mode)
+        class_logits_norm = self.apply_logit_norm(class_logits, context="matching")
+
         
         # Flatten batch dimension for matching
         class_logits_flat = class_logits_norm.flatten(0, 1)  # [B*Q, C+1]
@@ -305,7 +326,8 @@ class MaskClassificationLoss(nn.Module):
         losses = {}
         
         # Classification loss (with LogitNorm)
-        class_logits_norm = self.apply_logit_norm(class_queries_logits)
+        class_logits_norm = self.apply_logit_norm(class_queries_logits, context="ce")
+
         
         # Prepare target classes
         target_classes = torch.full(

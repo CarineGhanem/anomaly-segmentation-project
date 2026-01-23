@@ -6,7 +6,7 @@
 trainer:
   max_epochs: 20 # Unified to 20 epochs
   precision: "16-mixed"
-  accumulate_grad_batches: 4
+  accumulate_grad_batches: 8
   gradient_clip_val: 0.01
   gradient_clip_algorithm: "norm"
   log_every_n_steps: 50
@@ -47,6 +47,7 @@ model:
     # LogitNorm settings
     use_logit_norm: True
     logit_norm_temp: 0.1 # Increased from 0.1 to reduce distribution shift
+    logit_norm_mode: "both" # Apply LogitNorm during matching and CE loss
 
     # Stage control (FLAT keys)
     finetune_stage: "B_queries"
@@ -59,7 +60,7 @@ model:
     load_ckpt_class_head: True # Load trained heads from Stage A
 
     # Optimizer control (FLAT keys) - Higher LR for queries
-    lr: 0.001 # 1e-3 for queries (they're small)
+    lr: 0.0005
     weight_decay: 0.01
     llrd: 0.8
     llrd_l2_enabled: True

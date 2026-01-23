@@ -44,6 +44,7 @@ class MaskClassificationSemantic(LightningModule):
         # LogitNorm parameters
         use_logit_norm: bool = True,
         logit_norm_temp: float = 0.1,
+        logit_norm_mode: str = "both",   # <--- NEW
         # Fine-tuning stage parameters
         finetune_stage: str = "full",
         lora: Optional[dict] = None,
@@ -93,17 +94,21 @@ class MaskClassificationSemantic(LightningModule):
             no_object_coefficient=no_object_coefficient,
             use_logit_norm=use_logit_norm,
             logit_norm_temp=logit_norm_temp,
+            logit_norm_mode=logit_norm_mode,   # <--- NEW
         )
         
         # Store LogitNorm settings
         self.use_logit_norm = use_logit_norm
         self.logit_norm_temp = logit_norm_temp
+        logit_norm_mode=logit_norm_mode,
         
         logging.info(f"\n{'='*60}")
         logging.info(f"LogitNorm Configuration:")
         logging.info(f"  Enabled: {use_logit_norm}")
         logging.info(f"  Temperature: {logit_norm_temp}")
+        logging.info(f"  Mode: {logit_norm_mode}")   # <--- NEW
         logging.info(f"{'='*60}\n")
+
 
         # Initialize metrics
         num_metric_blocks = self.network.num_blocks + 1 if self.network.masked_attn_enabled else 1
