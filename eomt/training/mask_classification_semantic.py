@@ -100,7 +100,7 @@ class MaskClassificationSemantic(LightningModule):
         # Store LogitNorm settings
         self.use_logit_norm = use_logit_norm
         self.logit_norm_temp = logit_norm_temp
-        logit_norm_mode=logit_norm_mode,
+        self.logit_norm_mode = logit_norm_mode
         
         logging.info(f"\n{'='*60}")
         logging.info(f"LogitNorm Configuration:")
