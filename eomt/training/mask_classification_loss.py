@@ -2,18 +2,15 @@
 # © 2025 Mobile Perception Systems Lab at TU/e. All rights reserved.
 # Licensed under the MIT License.
 #
-# Portions of this file are adapted from the Hugging Face Transformers library,
-# specifically from the Mask2Former loss implementation, which itself is based on
-# Mask2Former and DETR by Facebook, Inc. and its affiliates.
-# Used under the Apache 2.0 License.
+# MAGNITUDE-AWARE CALIBRATION EXTENSION
+# Addresses the AUPRC/FPR trade-off in anomaly detection
 # ---------------------------------------------------------------
-
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 class MaskClassificationLoss(nn.Module):
@@ -29,7 +26,13 @@ class MaskClassificationLoss(nn.Module):
         no_object_coefficient: float,
         use_logit_norm: bool = False,
         logit_norm_temp: float = 0.1,
-        logit_norm_mode: str = "both",   # <--- NEW
+        logit_norm_mode: str = "ce",  # "none", "ce", "matching", "both"
+        # NEW: Magnitude-aware calibration parameters
+        use_magnitude_loss: bool = False,
+        magnitude_coefficient: float = 0.5,
+        magnitude_threshold: float = 1.0,
+        use_adaptive_temperature: bool = False,
+        adaptive_temp_range: tuple = (0.1, 1.0),  # (min_temp, max_temp)
     ):
         super().__init__()
         
@@ -44,52 +47,224 @@ class MaskClassificationLoss(nn.Module):
         # LogitNorm parameters
         self.use_logit_norm = use_logit_norm
         self.logit_norm_temp = logit_norm_temp
-
-        # NEW: controls where to apply LogitNorm
+        
+        # Validate logit_norm_mode
         allowed = {"none", "ce", "matching", "both"}
         if logit_norm_mode not in allowed:
             raise ValueError(f"logit_norm_mode must be one of {allowed}, got {logit_norm_mode}")
         self.logit_norm_mode = logit_norm_mode
         
+        # NEW: Magnitude-aware calibration parameters
+        self.use_magnitude_loss = use_magnitude_loss
+        self.magnitude_coefficient = magnitude_coefficient
+        self.magnitude_threshold = magnitude_threshold
+        self.use_adaptive_temperature = use_adaptive_temperature
+        self.adaptive_temp_range = adaptive_temp_range
+        
         # Class weights with no-object class
         empty_weight = torch.ones(num_labels + 1)
         empty_weight[-1] = no_object_coefficient
         self.register_buffer("empty_weight", empty_weight)
+        
+        # For logging/debugging
+        self.register_buffer("_last_adaptive_temp", torch.tensor(logit_norm_temp))
 
     def apply_logit_norm(
         self,
         class_logits: torch.Tensor,
         *,
-        context: str,          # "ce" or "matching"
+        context: str,
+        temperature: Optional[float] = None,
         eps: float = 1e-6
     ) -> torch.Tensor:
         """
         Apply LogitNorm depending on mode + context.
-
+        
         Args:
             class_logits: [B, Q, C+1] raw logits
             context: "ce" or "matching"
+            temperature: Optional override temperature (for adaptive mode)
+            eps: Small constant for numerical stability
         """
         if not self.use_logit_norm:
             return class_logits
-
+        
         mode = self.logit_norm_mode
         if mode == "none":
             return class_logits
-        if mode == "both":
+        elif mode == "both":
             apply = True
         elif mode == "ce":
             apply = (context == "ce")
         elif mode == "matching":
             apply = (context == "matching")
         else:
-            apply = False  # should never happen due to validation
-
+            apply = False
+        
         if not apply:
             return class_logits
-
+        
+        # Use provided temperature or default
+        temp = temperature if temperature is not None else self.logit_norm_temp
+        
+        # L2 normalize and scale by temperature
         norm = torch.norm(class_logits, p=2, dim=-1, keepdim=True)
-        return class_logits / (norm + eps) / self.logit_norm_temp
+        return class_logits / (norm + eps) / temp
+
+    def compute_adaptive_temperature(
+        self,
+        class_logits: torch.Tensor,
+        indices: List[tuple]
+    ) -> float:
+        """
+        Compute adaptive temperature based on prediction confidence.
+        
+        Theory:
+        - High confidence predictions → use lower temperature (stronger normalization)
+        - Low confidence predictions → use higher temperature (preserve magnitude)
+        
+        This helps preserve magnitude information when the model is uncertain,
+        which is critical for OOD detection on challenging datasets.
+        
+        Args:
+            class_logits: [B, Q, C+1] raw logits
+            indices: List of (src_idx, tgt_idx) tuples from Hungarian matching
+            
+        Returns:
+            Adaptive temperature value
+        """
+        if not self.use_adaptive_temperature:
+            return self.logit_norm_temp
+        
+        # Collect logits for matched predictions
+        matched_logits = []
+        for i, (src_idx, tgt_idx) in enumerate(indices):
+            if len(src_idx) > 0:
+                # Get max logit (excluding no-object class) for matched queries
+                max_logits = class_logits[i, src_idx, :-1].max(dim=-1)[0]
+                matched_logits.append(max_logits)
+        
+        if len(matched_logits) == 0:
+            # No matches - use max temperature (preserve magnitude)
+            return self.adaptive_temp_range[1]
+        
+        # Compute mean confidence across matched predictions
+        all_matched = torch.cat(matched_logits)
+        mean_max_logit = all_matched.mean()
+        
+        # Map logit magnitude to temperature
+        # High magnitude (confident) → low temperature
+        # Low magnitude (uncertain) → high temperature
+        
+        # Sigmoid to map to [0, 1], where 0 = very uncertain, 1 = very confident
+        # Using logit/10 to make sigmoid more sensitive around [-5, 5] range
+        confidence_score = torch.sigmoid(mean_max_logit / 10.0)
+        
+        # Linear interpolation between temp_range
+        min_temp, max_temp = self.adaptive_temp_range
+        adaptive_temp = max_temp + (min_temp - max_temp) * confidence_score
+        
+        # Store for logging
+        self._last_adaptive_temp.copy_(adaptive_temp.detach())
+        
+        return adaptive_temp.item()
+
+    def compute_magnitude_regularizer(
+        self,
+        class_logits: torch.Tensor,
+        indices: List[tuple],
+    ) -> torch.Tensor:
+        """
+        NEW: Magnitude regularization for unmatched queries.
+        
+        Theory:
+        - Matched queries should have HIGH magnitude (confident predictions)
+        - Unmatched queries (predicting no-object) should have LOW magnitude
+        - This creates a magnitude-based separation useful for OOD detection
+        
+        The key insight: Even with LogitNorm applied during CE loss,
+        we can still regularize the RAW logit magnitudes to maintain
+        the discriminative power needed for anomaly detection.
+        
+        Args:
+            class_logits: [B, Q, C+1] RAW logits (before normalization)
+            indices: List of (src_idx, tgt_idx) from Hungarian matching
+            
+        Returns:
+            Magnitude regularization loss
+        """
+        B, Q = class_logits.shape[:2]
+        device = class_logits.device
+        
+        # Compute L2 norm (magnitude) per query
+        magnitudes = torch.norm(class_logits, p=2, dim=-1)  # [B, Q]
+        
+        # Create mask for unmatched queries
+        unmatched_mask = torch.ones(B, Q, dtype=torch.bool, device=device)
+        for i, (src_idx, _) in enumerate(indices):
+            if len(src_idx) > 0:
+                unmatched_mask[i, src_idx] = False
+        
+        # Get magnitudes for unmatched queries
+        unmatched_magnitudes = magnitudes[unmatched_mask]
+        
+        if len(unmatched_magnitudes) == 0:
+            return torch.tensor(0.0, device=device)
+        
+        # Loss: Encourage unmatched queries to have low magnitude
+        # Using MSE to push magnitudes toward the threshold
+        target_magnitude = self.magnitude_threshold
+        loss_mag = F.mse_loss(
+            unmatched_magnitudes,
+            torch.full_like(unmatched_magnitudes, target_magnitude)
+        )
+        
+        return loss_mag
+
+    def compute_max_logit_regularizer(
+        self,
+        class_logits: torch.Tensor,
+        indices: List[tuple],
+    ) -> torch.Tensor:
+        """
+        NEW: Max-logit regularization for unmatched queries.
+        
+        Theory:
+        - OOD samples should have uniformly LOW logits across all classes
+        - Unmatched queries predicting "no-object" should have low max-logit
+        - This complements magnitude loss by focusing on the logit distribution shape
+        
+        Args:
+            class_logits: [B, Q, C+1] RAW logits
+            indices: Hungarian matching indices
+            
+        Returns:
+            Max-logit regularization loss
+        """
+        B, Q = class_logits.shape[:2]
+        device = class_logits.device
+        
+        # Get max logit for each query (excluding no-object class)
+        max_logits = class_logits[..., :-1].max(dim=-1)[0]  # [B, Q]
+        
+        # Create mask for unmatched queries
+        unmatched_mask = torch.ones(B, Q, dtype=torch.bool, device=device)
+        for i, (src_idx, _) in enumerate(indices):
+            if len(src_idx) > 0:
+                unmatched_mask[i, src_idx] = False
+        
+        # Get max logits for unmatched queries
+        unmatched_max_logits = max_logits[unmatched_mask]
+        
+        if len(unmatched_max_logits) == 0:
+            return torch.tensor(0.0, device=device)
+        
+        # Loss: Penalize high max-logits for unmatched queries
+        # Use hinge loss: only penalize if max_logit > threshold
+        threshold = 0.0  # Can be tuned
+        loss = F.relu(unmatched_max_logits - threshold).mean()
+        
+        return loss
 
     def point_sample(self, input, point_coords, **kwargs):
         """Sample features at point coordinates."""
@@ -189,13 +364,11 @@ class MaskClassificationLoss(nn.Module):
         Q, P = inputs.shape
         T = targets.shape[0]
 
-        out = inputs[:, None, :].expand(Q, T, P)                 # [Q,T,P]
-        tgt = targets[None, :, :].float().expand(Q, T, P)        # [Q,T,P]
+        out = inputs[:, None, :].expand(Q, T, P)
+        tgt = targets[None, :, :].float().expand(Q, T, P)
 
-        loss = F.binary_cross_entropy_with_logits(out, tgt, reduction="none")  # [Q,T,P]
-        return loss.mean(-1)  # [Q,T]
-
-
+        loss = F.binary_cross_entropy_with_logits(out, tgt, reduction="none")
+        return loss.mean(-1)
 
     def pairwise_dice_loss(self, inputs, targets):
         """
@@ -206,26 +379,38 @@ class MaskClassificationLoss(nn.Module):
         Q, P = inputs.shape
         T = targets.shape[0]
 
-        out = inputs[:, None, :].sigmoid().expand(Q, T, P)       # [Q,T,P]
-        tgt = targets[None, :, :].float().expand(Q, T, P)        # [Q,T,P]
+        out = inputs[:, None, :].sigmoid().expand(Q, T, P)
+        tgt = targets[None, :, :].float().expand(Q, T, P)
 
-        numerator = 2 * (out * tgt).sum(-1)                      # [Q,T]
-        denominator = out.sum(-1) + tgt.sum(-1)                  # [Q,T]
+        numerator = 2 * (out * tgt).sum(-1)
+        denominator = out.sum(-1) + tgt.sum(-1)
         return 1 - (numerator + 1.0) / (denominator + 1.0)
 
-
     def hungarian_matching(self, mask_logits, class_logits, gt_masks, gt_labels):
-        """Perform Hungarian matching between predictions and ground truth."""
+        """
+        Perform Hungarian matching between predictions and ground truth.
+        
+        CRITICAL: This now uses RAW logits by default (no LogitNorm applied)
+        unless logit_norm_mode is "matching" or "both".
+        """
         B, Q = class_logits.shape[:2]
         
-         # Apply LogitNorm before matching (if enabled by mode)
-        class_logits_norm = self.apply_logit_norm(class_logits, context="matching")
-
+        # IMPORTANT: Compute adaptive temperature if enabled
+        # This must be done BEFORE applying any normalization
+        if self.use_adaptive_temperature:
+            # Create temporary indices to compute adaptive temp
+            # We'll recompute matching with the adaptive temp
+            pass  # Will be used in forward()
+        
+        # Apply LogitNorm for matching ONLY if mode requires it
+        class_logits_for_matching = self.apply_logit_norm(
+            class_logits,
+            context="matching"
+        )
         
         # Flatten batch dimension for matching
-        class_logits_flat = class_logits_norm.flatten(0, 1)  # [B*Q, C+1]
-       
-        mask_logits_flat = mask_logits.detach().flatten(0, 1)  # [B*Q, H, W]
+        class_logits_flat = class_logits_for_matching.flatten(0, 1)
+        mask_logits_flat = mask_logits.detach().flatten(0, 1)
         
         indices = []
         
@@ -242,16 +427,14 @@ class MaskClassificationLoss(nn.Module):
                 continue
             
             # Get predictions for this sample
-            out_prob = class_logits_flat[i*Q:(i+1)*Q].softmax(-1)  # [Q, C+1]
-            out_mask = mask_logits_flat[i*Q:(i+1)*Q]  # [Q, H, W]
+            out_prob = class_logits_flat[i*Q:(i+1)*Q].softmax(-1)
+            out_mask = mask_logits_flat[i*Q:(i+1)*Q]
             
             # Classification cost
-            cost_class = -out_prob[:, tgt_ids]  # [Q, num_gt]
+            cost_class = -out_prob[:, tgt_ids]
             
-            # Mask costs (using sampled points for efficiency)
-            
+            # Sample points for cost computation
             with torch.no_grad():
-                # Sample points for cost computation
                 point_coords = torch.rand(
                     1, min(self.num_points, tgt_masks.shape[1] * tgt_masks.shape[2]), 2,
                     device=mask_logits.device
@@ -269,8 +452,8 @@ class MaskClassificationLoss(nn.Module):
                     align_corners=False
                 ).squeeze(1)
             
-            cost_mask = self.pairwise_sigmoid_ce_loss(out_mask_sample, tgt_masks_sample)  # [Q,T]
-            cost_dice = self.pairwise_dice_loss(out_mask_sample, tgt_masks_sample)        # [Q,T]
+            cost_mask = self.pairwise_sigmoid_ce_loss(out_mask_sample, tgt_masks_sample)
+            cost_dice = self.pairwise_dice_loss(out_mask_sample, tgt_masks_sample)
             
             # Total cost
             cost = (
@@ -279,7 +462,7 @@ class MaskClassificationLoss(nn.Module):
                 self.dice_coefficient * cost_dice
             )
             
-            # Hungarian algorithm (detach before converting to numpy)
+            # Hungarian algorithm
             src_idx, tgt_idx = linear_sum_assignment(cost.detach().cpu().numpy())
             indices.append((
                 torch.as_tensor(src_idx, dtype=torch.long, device=mask_logits.device),
@@ -290,7 +473,7 @@ class MaskClassificationLoss(nn.Module):
 
     def forward(self, masks_queries_logits, class_queries_logits, targets):
         """
-        Compute losses.
+        Compute losses with magnitude-aware calibration.
         
         Args:
             masks_queries_logits: [B, Q, H, W]
@@ -313,21 +496,37 @@ class MaskClassificationLoss(nn.Module):
                 align_corners=False
             )
         
-       
+        # Ensure proper gradient flow
         if not masks_queries_logits.requires_grad:
             masks_queries_logits = masks_queries_logits.detach()
         
-        # Hungarian matching
+        # STEP 1: Hungarian matching with raw or normalized logits
+        # (depending on logit_norm_mode)
         indices = self.hungarian_matching(
-            masks_queries_logits, class_queries_logits, gt_masks, gt_labels
+            masks_queries_logits,
+            class_queries_logits,  # Will be normalized inside if needed
+            gt_masks,
+            gt_labels
         )
+        
+        # STEP 2: Compute adaptive temperature if enabled
+        if self.use_adaptive_temperature:
+            adaptive_temp = self.compute_adaptive_temperature(
+                class_queries_logits,
+                indices
+            )
+        else:
+            adaptive_temp = None
         
         # Initialize losses
         losses = {}
         
-        # Classification loss (with LogitNorm)
-        class_logits_norm = self.apply_logit_norm(class_queries_logits, context="ce")
-
+        # STEP 3: Classification loss with LogitNorm (and optional adaptive temp)
+        class_logits_norm = self.apply_logit_norm(
+            class_queries_logits,
+            context="ce",
+            temperature=adaptive_temp
+        )
         
         # Prepare target classes
         target_classes = torch.full(
@@ -339,7 +538,7 @@ class MaskClassificationLoss(nn.Module):
             if len(tgt_idx) > 0:
                 target_classes[i, src_idx] = gt_labels[i][tgt_idx]
         
-        # Compute cross entropy with LogitNorm logits
+        # Compute cross entropy with (potentially normalized) logits
         loss_ce = F.cross_entropy(
             class_logits_norm.transpose(1, 2),
             target_classes,
@@ -348,7 +547,7 @@ class MaskClassificationLoss(nn.Module):
         )
         losses["loss_ce"] = loss_ce
         
-        # Mask losses (only for matched queries)
+        # STEP 4: Mask losses (only for matched queries)
         num_masks = sum(len(tgt_idx) for _, tgt_idx in indices)
         
         if num_masks > 0:
@@ -382,6 +581,14 @@ class MaskClassificationLoss(nn.Module):
             losses["loss_mask"] = masks_queries_logits.sum() * 0.0
             losses["loss_dice"] = masks_queries_logits.sum() * 0.0
         
+        # STEP 5: NEW - Magnitude regularization
+        if self.use_magnitude_loss:
+            loss_magnitude = self.compute_magnitude_regularizer(
+                class_queries_logits,  # Use RAW logits
+                indices
+            )
+            losses["loss_magnitude"] = loss_magnitude
+        
         return losses
 
     def loss_total(self, losses_dict: Dict[str, torch.Tensor], log_fn) -> torch.Tensor:
@@ -395,11 +602,17 @@ class MaskClassificationLoss(nn.Module):
                 weighted_loss = value * self.mask_coefficient
             elif "loss_dice" in key:
                 weighted_loss = value * self.dice_coefficient
+            elif "loss_magnitude" in key:
+                weighted_loss = value * self.magnitude_coefficient
             else:
                 weighted_loss = value
             
             total_loss += weighted_loss
             log_fn(key, value, on_step=True, prog_bar=True)
+        
+        # Log adaptive temperature if used
+        if self.use_adaptive_temperature:
+            log_fn("adaptive_temp", self._last_adaptive_temp, on_step=True, prog_bar=False)
         
         log_fn("loss_total", total_loss, on_step=True, prog_bar=True)
         

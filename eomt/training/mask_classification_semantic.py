@@ -44,7 +44,13 @@ class MaskClassificationSemantic(LightningModule):
         # LogitNorm parameters
         use_logit_norm: bool = True,
         logit_norm_temp: float = 0.1,
-        logit_norm_mode: str = "both",   # <--- NEW
+        logit_norm_mode: str = "ce",
+        # NEW: Magnitude-aware calibration parameters
+        use_magnitude_loss: bool = False,
+        magnitude_coefficient: float = 0.5,
+        magnitude_threshold: float = 1.0,
+        use_adaptive_temperature: bool = False,
+        adaptive_temp_range: tuple = (0.1, 1.0),
         # Fine-tuning stage parameters
         finetune_stage: str = "full",
         lora: Optional[dict] = None,
@@ -82,7 +88,7 @@ class MaskClassificationSemantic(LightningModule):
         self.overlap_thresh = overlap_thresh
         self.stuff_classes = range(num_classes)
 
-        # Initialize criterion with LogitNorm support
+        # Initialize criterion with LogitNorm AND magnitude-aware calibration support
         self.criterion = MaskClassificationLoss(
             num_points=num_points,
             oversample_ratio=oversample_ratio,
@@ -94,21 +100,38 @@ class MaskClassificationSemantic(LightningModule):
             no_object_coefficient=no_object_coefficient,
             use_logit_norm=use_logit_norm,
             logit_norm_temp=logit_norm_temp,
-            logit_norm_mode=logit_norm_mode,   # <--- NEW
+            logit_norm_mode=logit_norm_mode,
+            # NEW: Magnitude-aware calibration
+            use_magnitude_loss=use_magnitude_loss,
+            magnitude_coefficient=magnitude_coefficient,
+            magnitude_threshold=magnitude_threshold,
+            use_adaptive_temperature=use_adaptive_temperature,
+            adaptive_temp_range=adaptive_temp_range,
         )
         
-        # Store LogitNorm settings
+        # Store settings for logging
         self.use_logit_norm = use_logit_norm
         self.logit_norm_temp = logit_norm_temp
         self.logit_norm_mode = logit_norm_mode
+        self.use_magnitude_loss = use_magnitude_loss
+        self.magnitude_coefficient = magnitude_coefficient
+        self.use_adaptive_temperature = use_adaptive_temperature
         
+        # Log configuration
         logging.info(f"\n{'='*60}")
-        logging.info(f"LogitNorm Configuration:")
-        logging.info(f"  Enabled: {use_logit_norm}")
-        logging.info(f"  Temperature: {logit_norm_temp}")
-        logging.info(f"  Mode: {logit_norm_mode}")   # <--- NEW
+        logging.info(f"Calibration Configuration:")
+        logging.info(f"  LogitNorm: {use_logit_norm}")
+        if use_logit_norm:
+            logging.info(f"    Temperature: {logit_norm_temp}")
+            logging.info(f"    Mode: {logit_norm_mode}")
+            logging.info(f"    Adaptive: {use_adaptive_temperature}")
+            if use_adaptive_temperature:
+                logging.info(f"    Temp Range: {adaptive_temp_range}")
+        logging.info(f"  Magnitude Loss: {use_magnitude_loss}")
+        if use_magnitude_loss:
+            logging.info(f"    Coefficient: {magnitude_coefficient}")
+            logging.info(f"    Threshold: {magnitude_threshold}")
         logging.info(f"{'='*60}\n")
-
 
         # Initialize metrics
         num_metric_blocks = self.network.num_blocks + 1 if self.network.masked_attn_enabled else 1
@@ -123,8 +146,9 @@ class MaskClassificationSemantic(LightningModule):
         """
         Evaluation step for semantic segmentation.
         
-        Note: LogitNorm is NOT applied during inference (use_logit_norm=False).
+        CRITICAL: LogitNorm is NOT applied during inference.
         LogitNorm is only used during training for loss computation.
+        This preserves magnitude information for OOD detection at test time.
         """
         imgs, targets = batch
 
@@ -139,8 +163,8 @@ class MaskClassificationSemantic(LightningModule):
         ):
             mask_logits = F.interpolate(mask_logits, self.img_size, mode="bilinear")
 
-            # Important: Do NOT apply LogitNorm during inference
-            # LogitNorm is only for training loss computation
+            # CRITICAL: Do NOT apply LogitNorm during inference
+            # This preserves magnitude information needed for OOD detection
             crop_logits = self.to_per_pixel_logits_semantic(
                 mask_logits,
                 class_logits,
