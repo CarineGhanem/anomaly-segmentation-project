@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Test script for validating the 3-stage fine-tuning setup locally.
-Tests parameter freezing, LogitNorm, and loss computation without heavy training.
+Test script for validating magnitude-aware calibration setup locally.
+Tests parameter freezing, LogitNorm modes, magnitude loss, and adaptive temperature.
 """
 
 import torch
@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 def test_stage_freezing(stage_name: str):
     """Test that the correct parameters are frozen/unfrozen for a given stage."""
-    from omegaconf import OmegaConf
     from training.mask_classification_semantic import MaskClassificationSemantic
     from models.eomt import EoMT
     from models.vit import ViT
@@ -45,7 +44,6 @@ def test_stage_freezing(stage_name: str):
             num_blocks=2,
             masked_attn_enabled=True,  
         )
-
         
         # Create model with the network
         model = MaskClassificationSemantic(
@@ -56,7 +54,8 @@ def test_stage_freezing(stage_name: str):
             attn_mask_annealing_start_steps=None,
             attn_mask_annealing_end_steps=None,
             use_logit_norm=True,
-            logit_norm_temp=0.1,
+            logit_norm_temp=0.5,
+            logit_norm_mode="ce",  # Updated default
             finetune_stage=stage_name,
             train_heads_in_stage_b=True,
             train_heads_in_stage_c=True,
@@ -78,6 +77,12 @@ def test_stage_freezing(stage_name: str):
             num_points=1024,
             oversample_ratio=3.0,
             importance_sample_ratio=0.75,
+            # NEW: Magnitude-aware parameters
+            use_magnitude_loss=False,
+            magnitude_coefficient=0.5,
+            magnitude_threshold=1.0,
+            use_adaptive_temperature=False,
+            adaptive_temp_range=(0.1, 1.0),
         )
     except Exception as e:
         logger.error(f"Failed to create model: {e}")
@@ -85,7 +90,7 @@ def test_stage_freezing(stage_name: str):
         traceback.print_exc()
         return False
     
-    # Manually trigger stage application (normally happens in on_fit_start)
+    # Manually trigger stage application (normally happens in setup)
     model.apply_finetune_stage()
     
     # Count parameters
@@ -138,16 +143,6 @@ def test_stage_freezing(stage_name: str):
             logger.warning(f"⚠ Stage B has {trainable_pct:.1f}% trainable (expected < 15%)")
             success = False
     
-    elif stage_name == "C_lora":
-        # Should have LoRA params
-        lora_params = [n for n in trainable_names if 'lora_' in n]
-        if not lora_params:
-            logger.warning("⚠ Stage C should have LoRA params, but none found")
-            logger.info("   Make sure LoRA is enabled in config and target_modules match your network")
-            success = False
-        else:
-            logger.info(f"✓ Stage C correctly injected {len(lora_params)} LoRA parameters")
-    
     elif stage_name == "full":
         if trainable_pct < 90:
             logger.warning(f"⚠ Full training should have >90% trainable, got {trainable_pct:.1f}%")
@@ -162,128 +157,415 @@ def test_stage_freezing(stage_name: str):
     return success
 
 
-def test_logit_norm():
-    """Test LogitNorm computation."""
+def test_logit_norm_modes():
+    """Test LogitNorm with different modes (none, ce, matching, both)."""
     logger.info(f"\n{'='*70}")
-    logger.info("TESTING LOGITNORM")
+    logger.info("TESTING LOGITNORM MODES")
     logger.info('='*70)
     
     from training.mask_classification_loss import MaskClassificationLoss
     
-    # Create loss with LogitNorm enabled
-    criterion = MaskClassificationLoss(
-        num_points=1024,
-        oversample_ratio=3.0,
-        importance_sample_ratio=0.75,
-        mask_coefficient=5.0,
-        dice_coefficient=5.0,
-        class_coefficient=2.0,
-        num_labels=19,
-        no_object_coefficient=0.1,
-        use_logit_norm=True,
-        logit_norm_temp=0.1,
-        logit_norm_mode="both",
-    )
-    
-    # Create dummy logits
+    # Test data
     B, Q, C = 2, 50, 19
-    class_logits = torch.randn(B, Q, C + 1)  # +1 for no-object class
-    
-    logger.info(f"\nInput class logits shape: {class_logits.shape}")
-    logger.info(f"Input class logits norm (per query): {class_logits.norm(dim=-1).mean().item():.4f}")
-    
-    # Apply LogitNorm
-    normalized = criterion.apply_logit_norm(class_logits, context="both")
-    
-    logger.info(f"\nNormalized logits shape: {normalized.shape}")
-    logger.info(f"Normalized logits norm (per query): {normalized.norm(dim=-1).mean().item():.4f}")
-    logger.info(f"Expected norm: ~{1.0 / criterion.logit_norm_temp:.4f}")
-    
-    # Check that norm is approximately 1/temperature
-    expected_norm = 1.0 / criterion.logit_norm_temp
-    actual_norm = normalized.norm(dim=-1).mean().item()
-    norm_diff = abs(actual_norm - expected_norm)
-    
-    success = norm_diff < 0.5  # Allow some tolerance
-    
-    if success:
-        logger.info(f"✓ LogitNorm working correctly (norm diff: {norm_diff:.4f})")
-    else:
-        logger.warning(f"⚠ LogitNorm norm mismatch (diff: {norm_diff:.4f})")
-    
-    logger.info(f"\n{'='*70}")
-    logger.info(f"LogitNorm: {'✓ PASSED' if success else '✗ FAILED'}")
-    logger.info('='*70 + '\n')
-    
-    return success
-
-
-def test_loss_computation():
-    """Test that loss computation works with LogitNorm."""
-    logger.info(f"\n{'='*70}")
-    logger.info("TESTING LOSS COMPUTATION")
-    logger.info('='*70)
-    
-    from training.mask_classification_loss import MaskClassificationLoss
-    
-    # Create loss
-    criterion = MaskClassificationLoss(
-        num_points=512,  # Small for speed
-        oversample_ratio=3.0,
-        importance_sample_ratio=0.75,
-        mask_coefficient=5.0,
-        dice_coefficient=5.0,
-        class_coefficient=2.0,
-        num_labels=19,
-        no_object_coefficient=0.1,
-        use_logit_norm=True,
-        logit_norm_temp=0.1,
-    )
-    
-    # Create dummy data - FIXED: Match number of queries
-    B, Q, H, W, C = 1, 20, 64, 64, 19
-    num_objects = 5
-    
-    mask_logits = torch.randn(B, Q, H, W)
     class_logits = torch.randn(B, Q, C + 1)
     
-    # Create dummy targets
-    targets = [{
-        'masks': torch.randint(0, 2, (num_objects, H, W)).bool(),  # num_objects masks
-        'labels': torch.randint(0, C, (num_objects,)),
-    }]
+    modes_to_test = ["none", "ce", "matching", "both"]
+    results = {}
     
-    logger.info(f"\nInput shapes:")
-    logger.info(f"  Mask logits: {mask_logits.shape}")
-    logger.info(f"  Class logits: {class_logits.shape}")
-    logger.info(f"  Targets: {len(targets[0]['masks'])} objects")
+    for mode in modes_to_test:
+        logger.info(f"\n--- Testing mode: {mode} ---")
+        
+        criterion = MaskClassificationLoss(
+            num_points=1024,
+            oversample_ratio=3.0,
+            importance_sample_ratio=0.75,
+            mask_coefficient=5.0,
+            dice_coefficient=5.0,
+            class_coefficient=2.0,
+            num_labels=19,
+            no_object_coefficient=0.1,
+            use_logit_norm=True,
+            logit_norm_temp=0.5,
+            logit_norm_mode=mode,
+        )
+        
+        # Test CE context
+        ce_normalized = criterion.apply_logit_norm(class_logits, context="ce")
+        ce_is_normalized = not torch.allclose(ce_normalized, class_logits, rtol=0.01)
+        
+        # Test matching context
+        matching_normalized = criterion.apply_logit_norm(class_logits, context="matching")
+        matching_is_normalized = not torch.allclose(matching_normalized, class_logits, rtol=0.01)
+        
+        logger.info(f"  CE context normalized: {ce_is_normalized}")
+        logger.info(f"  Matching context normalized: {matching_is_normalized}")
+        
+        # Verify behavior
+        if mode == "none":
+            expected = (False, False)
+        elif mode == "ce":
+            expected = (True, False)
+        elif mode == "matching":
+            expected = (False, True)
+        elif mode == "both":
+            expected = (True, True)
+        
+        actual = (ce_is_normalized, matching_is_normalized)
+        success = actual == expected
+        
+        if success:
+            logger.info(f"  ✓ Mode '{mode}' behaves correctly")
+        else:
+            logger.warning(f"  ✗ Mode '{mode}' behavior incorrect: expected {expected}, got {actual}")
+        
+        results[mode] = success
+    
+    all_passed = all(results.values())
+    
+    logger.info(f"\n{'='*70}")
+    logger.info(f"LogitNorm Modes: {'✓ PASSED' if all_passed else '✗ FAILED'}")
+    logger.info('='*70 + '\n')
+    
+    return all_passed
+
+
+def test_magnitude_loss():
+    """Test magnitude regularization computation."""
+    logger.info(f"\n{'='*70}")
+    logger.info("TESTING MAGNITUDE LOSS")
+    logger.info('='*70)
+    
+    from training.mask_classification_loss import MaskClassificationLoss
+    
+    # Create loss with magnitude loss enabled
+    criterion = MaskClassificationLoss(
+        num_points=512,
+        oversample_ratio=3.0,
+        importance_sample_ratio=0.75,
+        mask_coefficient=5.0,
+        dice_coefficient=5.0,
+        class_coefficient=2.0,
+        num_labels=19,
+        no_object_coefficient=0.1,
+        use_logit_norm=True,
+        logit_norm_temp=0.5,
+        logit_norm_mode="ce",
+        # Enable magnitude loss
+        use_magnitude_loss=True,
+        magnitude_coefficient=0.5,
+        magnitude_threshold=1.0,
+    )
+    
+    # Create dummy data
+    B, Q, C = 2, 20, 19
+    class_logits = torch.randn(B, Q, C + 1)
+    
+    # Create dummy indices (some matched, some unmatched)
+    indices = [
+        (torch.tensor([0, 2, 5], dtype=torch.long), torch.tensor([0, 1, 2], dtype=torch.long)),
+        (torch.tensor([1, 3], dtype=torch.long), torch.tensor([0, 1], dtype=torch.long)),
+    ]
+    
+    logger.info(f"\nTest setup:")
+    logger.info(f"  Batch size: {B}, Queries: {Q}, Classes: {C}")
+    logger.info(f"  Matched queries batch 0: {indices[0][0].tolist()}")
+    logger.info(f"  Matched queries batch 1: {indices[1][0].tolist()}")
     
     try:
-        # Compute losses
-        losses = criterion(mask_logits, class_logits, targets)
+        # Compute magnitude loss
+        loss_magnitude = criterion.compute_magnitude_regularizer(class_logits, indices)
         
-        logger.info(f"\nComputed losses:")
-        for key, value in losses.items():
-            logger.info(f"  {key}: {value.item():.4f}")
+        logger.info(f"\nMagnitude loss computation:")
+        logger.info(f"  Loss value: {loss_magnitude.item():.4f}")
+        logger.info(f"  Loss is finite: {torch.isfinite(loss_magnitude).item()}")
+        logger.info(f"  Loss is non-negative: {(loss_magnitude >= 0).item()}")
         
-        # Check that losses are finite
-        all_finite = all(torch.isfinite(v) for v in losses.values())
+        # Verify properties
+        success = (
+            torch.isfinite(loss_magnitude).item() and
+            loss_magnitude.item() >= 0
+        )
         
-        if all_finite:
-            logger.info("✓ All losses are finite")
-            success = True
+        if success:
+            logger.info("✓ Magnitude loss computed correctly")
         else:
-            logger.warning("⚠ Some losses are NaN or Inf")
-            success = False
+            logger.warning("✗ Magnitude loss has invalid properties")
         
     except Exception as e:
-        logger.error(f"✗ Loss computation failed: {e}")
+        logger.error(f"✗ Magnitude loss computation failed: {e}")
         import traceback
         traceback.print_exc()
         success = False
     
     logger.info(f"\n{'='*70}")
-    logger.info(f"Loss computation: {'✓ PASSED' if success else '✗ FAILED'}")
+    logger.info(f"Magnitude Loss: {'✓ PASSED' if success else '✗ FAILED'}")
+    logger.info('='*70 + '\n')
+    
+    return success
+
+
+def test_adaptive_temperature():
+    """Test adaptive temperature computation."""
+    logger.info(f"\n{'='*70}")
+    logger.info("TESTING ADAPTIVE TEMPERATURE")
+    logger.info('='*70)
+    
+    from training.mask_classification_loss import MaskClassificationLoss
+    
+    # Create loss with adaptive temperature enabled
+    criterion = MaskClassificationLoss(
+        num_points=512,
+        oversample_ratio=3.0,
+        importance_sample_ratio=0.75,
+        mask_coefficient=5.0,
+        dice_coefficient=5.0,
+        class_coefficient=2.0,
+        num_labels=19,
+        no_object_coefficient=0.1,
+        use_logit_norm=True,
+        logit_norm_temp=0.5,
+        logit_norm_mode="ce",
+        use_adaptive_temperature=True,
+        adaptive_temp_range=(0.1, 1.0),
+    )
+    
+    # Test case 1: High confidence (should get low temperature)
+    logger.info("\n--- Test 1: High confidence predictions ---")
+    high_conf_logits = torch.tensor([
+        [[10.0, 2.0, 1.0, 0.5] for _ in range(10)],
+        [[9.5, 1.8, 1.2, 0.3] for _ in range(10)],
+    ])  # [B=2, Q=10, C+1=4]
+    
+    indices_high = [
+        (torch.tensor([0, 1, 2], dtype=torch.long), torch.tensor([0, 1, 2], dtype=torch.long)),
+        (torch.tensor([0, 1], dtype=torch.long), torch.tensor([0, 1], dtype=torch.long)),
+    ]
+    
+    temp_high = criterion.compute_adaptive_temperature(high_conf_logits, indices_high)
+    logger.info(f"  High confidence → Temperature: {temp_high:.4f}")
+    logger.info(f"  Expected: Close to {criterion.adaptive_temp_range[0]} (low temp)")
+    
+    # Test case 2: Low confidence (should get high temperature)
+    logger.info("\n--- Test 2: Low confidence predictions ---")
+    low_conf_logits = torch.tensor([
+        [[2.0, 1.8, 1.5, 1.2] for _ in range(10)],
+        [[2.5, 2.2, 1.9, 1.6] for _ in range(10)],
+    ])
+    
+    indices_low = [
+        (torch.tensor([0, 1], dtype=torch.long), torch.tensor([0, 1], dtype=torch.long)),
+        (torch.tensor([0], dtype=torch.long), torch.tensor([0], dtype=torch.long)),
+    ]
+    
+    temp_low = criterion.compute_adaptive_temperature(low_conf_logits, indices_low)
+    logger.info(f"  Low confidence → Temperature: {temp_low:.4f}")
+    logger.info(f"  Expected: Close to {criterion.adaptive_temp_range[1]} (high temp)")
+    
+    # Test case 3: No matches (should get max temperature)
+    logger.info("\n--- Test 3: No matches ---")
+    no_match_logits = torch.randn(2, 10, 4)
+    indices_empty = [
+        (torch.tensor([], dtype=torch.long), torch.tensor([], dtype=torch.long)),
+        (torch.tensor([], dtype=torch.long), torch.tensor([], dtype=torch.long)),
+    ]
+    
+    temp_empty = criterion.compute_adaptive_temperature(no_match_logits, indices_empty)
+    logger.info(f"  No matches → Temperature: {temp_empty:.4f}")
+    logger.info(f"  Expected: {criterion.adaptive_temp_range[1]} (max temp)")
+    
+    # Verify behavior
+    min_temp, max_temp = criterion.adaptive_temp_range
+    success = (
+        min_temp <= temp_high <= max_temp and
+        min_temp <= temp_low <= max_temp and
+        temp_high < temp_low and  # High confidence should have lower temp
+        abs(temp_empty - max_temp) < 0.01  # No matches should be max temp
+    )
+    
+    if success:
+        logger.info("\n✓ Adaptive temperature behaves correctly")
+    else:
+        logger.warning("\n✗ Adaptive temperature behavior unexpected")
+    
+    logger.info(f"\n{'='*70}")
+    logger.info(f"Adaptive Temperature: {'✓ PASSED' if success else '✗ FAILED'}")
+    logger.info('='*70 + '\n')
+    
+    return success
+
+
+def test_full_loss_computation():
+    """Test full loss computation with all magnitude-aware features."""
+    logger.info(f"\n{'='*70}")
+    logger.info("TESTING FULL LOSS COMPUTATION")
+    logger.info('='*70)
+    
+    from training.mask_classification_loss import MaskClassificationLoss
+    
+    # Test both configurations
+    configs = [
+        {
+            "name": "LogitNorm CE-only + Magnitude (Ablation 2)",
+            "use_logit_norm": True,
+            "logit_norm_mode": "ce",
+            "use_magnitude_loss": True,
+            "use_adaptive_temperature": False,
+        },
+        {
+            "name": "Adaptive Temp + Magnitude (Ablation 3)",
+            "use_logit_norm": True,
+            "logit_norm_mode": "ce",
+            "use_magnitude_loss": True,
+            "use_adaptive_temperature": True,
+        },
+    ]
+    
+    results = {}
+    
+    for config in configs:
+        logger.info(f"\n--- Testing: {config['name']} ---")
+        
+        # Create loss
+        criterion = MaskClassificationLoss(
+            num_points=512,
+            oversample_ratio=3.0,
+            importance_sample_ratio=0.75,
+            mask_coefficient=5.0,
+            dice_coefficient=5.0,
+            class_coefficient=2.0,
+            num_labels=19,
+            no_object_coefficient=0.1,
+            use_logit_norm=config["use_logit_norm"],
+            logit_norm_temp=0.5,
+            logit_norm_mode=config["logit_norm_mode"],
+            use_magnitude_loss=config["use_magnitude_loss"],
+            magnitude_coefficient=0.5,
+            magnitude_threshold=1.0,
+            use_adaptive_temperature=config["use_adaptive_temperature"],
+            adaptive_temp_range=(0.1, 1.0),
+        )
+        
+        # Create dummy data
+        B, Q, H, W, C = 1, 20, 64, 64, 19
+        num_objects = 5
+        
+        mask_logits = torch.randn(B, Q, H, W)
+        class_logits = torch.randn(B, Q, C + 1)
+        
+        targets = [{
+            'masks': torch.randint(0, 2, (num_objects, H, W)).bool(),
+            'labels': torch.randint(0, C, (num_objects,)),
+        }]
+        
+        try:
+            # Compute losses
+            losses = criterion(mask_logits, class_logits, targets)
+            
+            logger.info(f"  Computed losses:")
+            for key, value in losses.items():
+                logger.info(f"    {key}: {value.item():.4f}")
+            
+            # Check expected losses
+            expected_losses = ["loss_ce", "loss_mask", "loss_dice"]
+            if config["use_magnitude_loss"]:
+                expected_losses.append("loss_magnitude")
+            
+            # Verify all expected losses present
+            missing = [k for k in expected_losses if k not in losses]
+            unexpected = [k for k in losses if k not in expected_losses]
+            
+            if missing:
+                logger.warning(f"  ⚠ Missing losses: {missing}")
+            if unexpected:
+                logger.warning(f"  ⚠ Unexpected losses: {unexpected}")
+            
+            # Check all losses are finite
+            all_finite = all(torch.isfinite(v) for v in losses.values())
+            
+            success = all_finite and not missing
+            
+            if success:
+                logger.info(f"  ✓ All losses computed correctly")
+            else:
+                logger.warning(f"  ✗ Loss computation has issues")
+            
+            results[config["name"]] = success
+            
+        except Exception as e:
+            logger.error(f"  ✗ Loss computation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            results[config["name"]] = False
+    
+    all_passed = all(results.values())
+    
+    logger.info(f"\n{'='*70}")
+    logger.info(f"Full Loss Computation: {'✓ PASSED' if all_passed else '✗ FAILED'}")
+    logger.info('='*70 + '\n')
+    
+    return all_passed
+
+
+def test_backward_compatibility():
+    """Test that the new implementation is backward compatible."""
+    logger.info(f"\n{'='*70}")
+    logger.info("TESTING BACKWARD COMPATIBILITY")
+    logger.info('='*70)
+    
+    from training.mask_classification_loss import MaskClassificationLoss
+    
+    # Test case 1: Old style (no magnitude-aware features)
+    logger.info("\n--- Test 1: Old configuration (baseline) ---")
+    try:
+        criterion_old = MaskClassificationLoss(
+            num_points=512,
+            oversample_ratio=3.0,
+            importance_sample_ratio=0.75,
+            mask_coefficient=5.0,
+            dice_coefficient=5.0,
+            class_coefficient=2.0,
+            num_labels=19,
+            no_object_coefficient=0.1,
+            use_logit_norm=False,
+            logit_norm_temp=0.1,
+            logit_norm_mode="both",
+            # No magnitude-aware parameters
+        )
+        logger.info("  ✓ Old configuration works")
+        old_works = True
+    except Exception as e:
+        logger.error(f"  ✗ Old configuration failed: {e}")
+        old_works = False
+    
+    # Test case 2: Partial new features
+    logger.info("\n--- Test 2: Partial new features ---")
+    try:
+        criterion_partial = MaskClassificationLoss(
+            num_points=512,
+            oversample_ratio=3.0,
+            importance_sample_ratio=0.75,
+            mask_coefficient=5.0,
+            dice_coefficient=5.0,
+            class_coefficient=2.0,
+            num_labels=19,
+            no_object_coefficient=0.1,
+            use_logit_norm=True,
+            logit_norm_temp=0.5,
+            logit_norm_mode="ce",
+            use_magnitude_loss=True,  # Only magnitude loss
+            magnitude_coefficient=0.5,
+            # No adaptive temperature
+        )
+        logger.info("  ✓ Partial new features work")
+        partial_works = True
+    except Exception as e:
+        logger.error(f"  ✗ Partial new features failed: {e}")
+        partial_works = False
+    
+    success = old_works and partial_works
+    
+    logger.info(f"\n{'='*70}")
+    logger.info(f"Backward Compatibility: {'✓ PASSED' if success else '✗ FAILED'}")
     logger.info('='*70 + '\n')
     
     return success
@@ -292,26 +574,47 @@ def test_loss_computation():
 def main():
     """Run all tests."""
     logger.info("\n" + "="*70)
-    logger.info("STARTING LOCAL VALIDATION TESTS")
+    logger.info("MAGNITUDE-AWARE CALIBRATION - LOCAL VALIDATION")
     logger.info("="*70 + "\n")
     
     results = {}
     
-    # Test each stage
+    # Test 1: Stage freezing (basic functionality)
+    logger.info("="*70)
+    logger.info("PART 1: STAGE FREEZING TESTS")
+    logger.info("="*70)
     for stage in ["A_head", "B_queries", "full"]:
         results[f"stage_{stage}"] = test_stage_freezing(stage)
     
-    # Test Stage C separately (requires LoRA config)
-    logger.info("NOTE: Stage C (LoRA) test skipped by default.")
-    logger.info("      To test Stage C, set lora.enabled=True in trial_local.yaml")
-    logger.info("      and uncomment the test below.\n")
-    # results["stage_C_lora"] = test_stage_freezing("C_lora")
+    # Test 2: LogitNorm modes
+    logger.info("\n" + "="*70)
+    logger.info("PART 2: LOGITNORM MODE TESTS")
+    logger.info("="*70)
+    results["logit_norm_modes"] = test_logit_norm_modes()
     
-    # Test LogitNorm
-    results["logit_norm"] = test_logit_norm()
+    # Test 3: Magnitude loss
+    logger.info("\n" + "="*70)
+    logger.info("PART 3: MAGNITUDE LOSS TESTS")
+    logger.info("="*70)
+    results["magnitude_loss"] = test_magnitude_loss()
     
-    # Test loss computation
-    results["loss_computation"] = test_loss_computation()
+    # Test 4: Adaptive temperature
+    logger.info("\n" + "="*70)
+    logger.info("PART 4: ADAPTIVE TEMPERATURE TESTS")
+    logger.info("="*70)
+    results["adaptive_temperature"] = test_adaptive_temperature()
+    
+    # Test 5: Full loss computation
+    logger.info("\n" + "="*70)
+    logger.info("PART 5: FULL LOSS COMPUTATION TESTS")
+    logger.info("="*70)
+    results["full_loss_computation"] = test_full_loss_computation()
+    
+    # Test 6: Backward compatibility
+    logger.info("\n" + "="*70)
+    logger.info("PART 6: BACKWARD COMPATIBILITY TESTS")
+    logger.info("="*70)
+    results["backward_compatibility"] = test_backward_compatibility()
     
     # Summary
     logger.info("\n" + "="*70)
@@ -320,18 +623,25 @@ def main():
     
     for test_name, passed in results.items():
         status = "✓ PASSED" if passed else "✗ FAILED"
-        logger.info(f"{test_name:25s}: {status}")
+        logger.info(f"{test_name:30s}: {status}")
     
     all_passed = all(results.values())
     
     logger.info("\n" + "="*70)
     if all_passed:
         logger.info("ALL TESTS PASSED ✓")
-        logger.info("\nYou can now run training with:")
-        logger.info("  python main.py fit --config configs/trial_local.yaml")
+        logger.info("\nYour magnitude-aware calibration is ready!")
+        logger.info("\nNext steps:")
+        logger.info("  1. Update checkpoint paths in config files")
+        logger.info("  2. Run Ablation 2 (primary contribution):")
+        logger.info("     python main.py fit --config configs/dinov2/cityscapes/semantic/ablation2_logitnorm_ce_magnitude.yaml")
+        logger.info("  3. Evaluate on anomaly datasets")
     else:
         logger.info("SOME TESTS FAILED ✗")
-        logger.info("\nPlease fix the issues before proceeding to training.")
+        logger.info("\nPlease review the failures above and:")
+        logger.info("  1. Check that you've updated both code files")
+        logger.info("  2. Verify imports are working correctly")
+        logger.info("  3. Review error messages for specific issues")
     logger.info("="*70 + "\n")
     
     return 0 if all_passed else 1
