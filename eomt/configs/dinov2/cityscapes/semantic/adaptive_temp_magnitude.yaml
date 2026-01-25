@@ -1,0 +1,109 @@
+# ===============================================================
+# ABLATION 3: Adaptive Temperature + Magnitude Loss
+# Tests: Does adaptive calibration help across different datasets?
+# ===============================================================
+# Hypothesis: Adaptive temperature adjusts normalization strength
+# based on model confidence, preserving magnitude when uncertain
+
+trainer:
+  max_epochs: 20
+  precision: "16-mixed"
+  accumulate_grad_batches: 8
+  gradient_clip_val: 0.01
+  gradient_clip_algorithm: "norm"
+  log_every_n_steps: 50
+  check_val_every_n_epoch: 1
+  enable_model_summary: False
+  devices: 1
+
+  logger:
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
+    init_args:
+      resume: allow
+      project: "eomt"
+      name: "cs_eomt_ablation3_adaptive_temp_magnitude"
+
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: "outputs/ablation3_adaptive_temp_magnitude"
+        filename: "best-{epoch:02d}-{metrics/val_iou_all:.4f}"
+        monitor: "metrics/val_iou_all"
+        mode: "max"
+        save_top_k: 1
+        save_last: True
+        verbose: True
+
+model:
+  class_path: training.mask_classification_semantic.MaskClassificationSemantic
+  init_args:
+    img_size: [1024, 1024]
+    num_classes: 19
+
+    attn_mask_annealing_enabled: True
+    attn_mask_annealing_start_steps: [3317, 8292, 13268]
+    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+
+    # LogitNorm with adaptive temperature
+    use_logit_norm: True
+    logit_norm_temp: 0.5 # Base temperature
+    logit_norm_mode: "ce"
+
+    # Adaptive temperature: ENABLED
+    use_adaptive_temperature: True
+    adaptive_temp_range: [0.1, 1.0] # [min_temp, max_temp]
+    # Low confidence → temp closer to 1.0 (less normalization)
+    # High confidence → temp closer to 0.1 (more normalization)
+
+    # Magnitude-aware calibration: ENABLED
+    use_magnitude_loss: True
+    magnitude_coefficient: 0.5
+    magnitude_threshold: 1.0
+
+    # Stage control
+    finetune_stage: "A_class_only"
+    train_heads_in_stage_b: True
+    train_heads_in_stage_c: True
+
+    # Checkpoint loading
+    ckpt_path: "/content/drive/MyDrive/eomt_cityscapes.bin"
+    delta_weights: False
+    load_ckpt_class_head: False
+
+    # Optimizer
+    lr: 0.0005
+    weight_decay: 0.01
+    llrd: 0.8
+    llrd_l2_enabled: True
+    lr_mult: 1.0
+    poly_power: 0.9
+    warmup_steps: [100, 200]
+
+    # Loss coefficients
+    mask_coefficient: 5.0
+    dice_coefficient: 5.0
+    class_coefficient: 2.0
+    no_object_coefficient: 0.1
+    mask_thresh: 0.8
+    overlap_thresh: 0.8
+
+    num_points: 12544
+    oversample_ratio: 3.0
+    importance_sample_ratio: 0.75
+    ignore_idx: 255
+
+    lora:
+      enabled: False
+
+    network:
+      class_path: models.eomt.EoMT
+      init_args:
+        num_q: 100
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name: vit_base_patch14_reg4_dinov2
+
+data:
+  class_path: datasets.cityscapes_semantic.CityscapesSemantic
