@@ -141,6 +141,50 @@ class MaskClassificationSemantic(LightningModule):
         # Initialize metrics
         num_metric_blocks = self.network.num_blocks + 1 if self.network.masked_attn_enabled else 1
         self.init_metrics_semantic(ignore_idx, num_metric_blocks)
+        
+    def training_step(self, batch, batch_idx):
+        """Training step with safe magnitude logging."""
+        imgs, targets = batch
+
+        mask_logits_per_block, class_logits_per_block = self(imgs)
+
+        losses_all_blocks = {}
+        for i, (mask_logits, class_logits) in enumerate(
+            list(zip(mask_logits_per_block, class_logits_per_block))
+        ):
+            losses = self.criterion(
+                masks_queries_logits=mask_logits,
+                class_queries_logits=class_logits,
+                targets=targets,
+            )
+            block_postfix = self.block_postfix(i)
+            losses = {f"{key}{block_postfix}": value for key, value in losses.items()}
+            losses_all_blocks |= losses
+            
+            # Log magnitude stats ONLY for final block
+            if i == len(mask_logits_per_block) - 1:
+                # Check if magnitude loss is enabled and it's margin type
+                if (self.use_magnitude_loss and 
+                    self.criterion.magnitude_loss_type == "margin"):
+                    
+                    # Safely access magnitude stats
+                    try:
+                        matched_mag = self.criterion._last_matched_mag.item()
+                        unmatched_mag = self.criterion._last_unmatched_mag.item()
+                        mag_diff = matched_mag - unmatched_mag
+                        
+                        # Log to progress bar
+                        self.log("matched_mag", matched_mag, 
+                                on_step=True, prog_bar=True, logger=True)
+                        self.log("unmatched_mag", unmatched_mag,
+                                on_step=True, prog_bar=True, logger=True)
+                        self.log("mag_diff", mag_diff, 
+                                on_step=True, prog_bar=True, logger=True)
+                    except Exception as e:
+                        # Silently skip if anything goes wrong
+                        pass
+
+        return self.criterion.loss_total(losses_all_blocks, self.log)
 
     def eval_step(
         self,

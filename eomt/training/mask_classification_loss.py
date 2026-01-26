@@ -152,87 +152,125 @@ class MaskClassificationLoss(nn.Module):
         self._last_adaptive_temp.copy_(adaptive_temp.detach())
         
         return adaptive_temp.item()
+    
 
-    def compute_magnitude_regularizer(
-        self,
-        class_logits: torch.Tensor,
-        indices: List[tuple],
-    ) -> torch.Tensor:
-        """
-        IMPROVED: Compute magnitude regularization with multiple loss types.
-        
-        Types:
-        - "margin": Ensure matched > unmatched by margin (dataset-agnostic)
-        - "hinge": Penalize only if unmatched magnitude > threshold (flexible)
-        - "mse": Original MSE loss (for comparison)
-        """
+
+    def compute_magnitude_regularizer(self, class_logits, indices):
+        """Dispatch to appropriate magnitude loss type."""
         if self.magnitude_loss_type == "margin":
             return self.compute_margin_magnitude_loss(class_logits, indices)
+        elif self.magnitude_loss_type == "soft_margin":  # NEW
+            return self.compute_soft_margin_magnitude_loss(class_logits, indices)
         elif self.magnitude_loss_type == "hinge":
             return self.compute_hinge_magnitude_loss(class_logits, indices)
         else:  # "mse"
             return self.compute_mse_magnitude_loss(class_logits, indices)
 
-    def compute_margin_magnitude_loss(
-        self,
-        class_logits: torch.Tensor,
-        indices: List[tuple],
-    ) -> torch.Tensor:
+    def compute_soft_margin_magnitude_loss(self, class_logits, indices):
         """
-        NEW: Margin-based magnitude loss (ArcFace-style).
-        
-        Theory:
-        - Matched queries should have HIGH magnitude (confident predictions)
-        - Unmatched queries should have LOW magnitude (uncertain/no-object)
-        - Ensure: mean(matched) > mean(unmatched) + margin
-        
-        Advantages:
-        - No absolute threshold (dataset-agnostic)
-        - Relative comparison adapts to dataset's natural magnitude range
-        - More robust than fixed thresholds
-        
-        Paper: "ArcFace: Additive Angular Margin Loss" (Deng et al., 2019)
+        Soft margin: Always provides gradient via exponential penalty.
         """
         B, Q = class_logits.shape[:2]
         device = class_logits.device
         
-        # Compute L2 norm (magnitude) per query
-        magnitudes = torch.norm(class_logits, p=2, dim=-1)  # [B, Q]
+        magnitudes = torch.norm(class_logits, p=2, dim=-1)
         
         matched_mags = []
         unmatched_mags = []
         
         for i in range(B):
             src_idx = indices[i][0]
-            
-            # Collect matched magnitudes
             if len(src_idx) > 0:
                 matched_mags.append(magnitudes[i, src_idx])
             
-            # Collect unmatched magnitudes
             unmatched_mask = torch.ones(Q, dtype=torch.bool, device=device)
             if len(src_idx) > 0:
                 unmatched_mask[src_idx] = False
             unmatched_mags.append(magnitudes[i, unmatched_mask])
         
-        # Need at least some matched predictions
         if len(matched_mags) == 0:
+            self._last_matched_mag.fill_(0.0)
+            self._last_unmatched_mag.fill_(0.0)
             return torch.tensor(0.0, device=device)
         
-        # Compute mean magnitudes
         matched_mean = torch.cat(matched_mags).mean()
         unmatched_mean = torch.cat(unmatched_mags).mean()
         
-        # Store for logging
         self._last_matched_mag.copy_(matched_mean.detach())
         self._last_unmatched_mag.copy_(unmatched_mean.detach())
         
-        # Margin loss: ensure matched > unmatched + margin
-        # If difference is already > margin, loss = 0
-        # If difference is < margin, penalize
-        loss = F.relu(self.magnitude_margin - (matched_mean - unmatched_mean))
+        # Soft exponential penalty
+        separation = matched_mean - unmatched_mean
+        target_separation = self.magnitude_margin
+        
+        # exp(-(sep - target)/target) 
+        # If sep = target: loss = exp(0) = 1.0
+        # If sep > target: loss < 1.0 (decreasing)
+        # If sep < target: loss > 1.0 (increasing)
+        loss = torch.exp(-(separation - target_separation) / target_separation)
         
         return loss
+
+    def compute_margin_magnitude_loss(
+            self,
+            class_logits: torch.Tensor,
+            indices: List[tuple],
+        ) -> torch.Tensor:
+            """
+            NEW: Margin-based magnitude loss (ArcFace-style).
+            
+            Theory:
+            - Matched queries should have HIGH magnitude (confident predictions)
+            - Unmatched queries should have LOW magnitude (uncertain/no-object)
+            - Ensure: mean(matched) > mean(unmatched) + margin
+            
+            Advantages:
+            - No absolute threshold (dataset-agnostic)
+            - Relative comparison adapts to dataset's natural magnitude range
+            - More robust than fixed thresholds
+            
+            Paper: "ArcFace: Additive Angular Margin Loss" (Deng et al., 2019)
+            """
+            B, Q = class_logits.shape[:2]
+            device = class_logits.device
+            
+            # Compute L2 norm (magnitude) per query
+            magnitudes = torch.norm(class_logits, p=2, dim=-1)  # [B, Q]
+            
+            matched_mags = []
+            unmatched_mags = []
+            
+            for i in range(B):
+                src_idx = indices[i][0]
+                
+                # Collect matched magnitudes
+                if len(src_idx) > 0:
+                    matched_mags.append(magnitudes[i, src_idx])
+                
+                # Collect unmatched magnitudes
+                unmatched_mask = torch.ones(Q, dtype=torch.bool, device=device)
+                if len(src_idx) > 0:
+                    unmatched_mask[src_idx] = False
+                unmatched_mags.append(magnitudes[i, unmatched_mask])
+            
+            # Need at least some matched predictions
+            if len(matched_mags) == 0:
+                return torch.tensor(0.0, device=device)
+            
+            # Compute mean magnitudes
+            matched_mean = torch.cat(matched_mags).mean()
+            unmatched_mean = torch.cat(unmatched_mags).mean()
+            
+            # Store for logging
+            self._last_matched_mag.copy_(matched_mean.detach())
+            self._last_unmatched_mag.copy_(unmatched_mean.detach())
+            
+            # Margin loss: ensure matched > unmatched + margin
+            # If difference is already > margin, loss = 0
+            # If difference is < margin, penalize
+            loss = F.relu(self.magnitude_margin - (matched_mean - unmatched_mean))
+            
+            return loss
 
     def compute_hinge_magnitude_loss(
         self,
@@ -599,34 +637,36 @@ class MaskClassificationLoss(nn.Module):
         
         return losses
 
-    def loss_total(self, losses_dict: Dict[str, torch.Tensor], log_fn) -> torch.Tensor:
-        """Compute total weighted loss."""
-        total_loss = 0.0
+    # In mask_classification_loss.py, update loss_total():
+
+def loss_total(self, losses_dict: Dict[str, torch.Tensor], log_fn) -> torch.Tensor:
+    """Compute total weighted loss."""
+    total_loss = 0.0
+    
+    for key, value in losses_dict.items():
+        if "loss_ce" in key:
+            weighted_loss = value * self.class_coefficient
+        elif "loss_mask" in key:
+            weighted_loss = value * self.mask_coefficient
+        elif "loss_dice" in key:
+            weighted_loss = value * self.dice_coefficient
+        elif "loss_magnitude" in key:
+            weighted_loss = value * self.magnitude_coefficient
+        else:
+            weighted_loss = value
         
-        for key, value in losses_dict.items():
-            if "loss_ce" in key:
-                weighted_loss = value * self.class_coefficient
-            elif "loss_mask" in key:
-                weighted_loss = value * self.mask_coefficient
-            elif "loss_dice" in key:
-                weighted_loss = value * self.dice_coefficient
-            elif "loss_magnitude" in key:
-                weighted_loss = value * self.magnitude_coefficient
-            else:
-                weighted_loss = value
-            
-            total_loss += weighted_loss
-            log_fn(key, value, on_step=True, prog_bar=True)
-        
-        # Log diagnostic info
-        if self.use_adaptive_temperature:
-            log_fn("adaptive_temp", self._last_adaptive_temp, on_step=True, prog_bar=False)
-        
-        if self.use_magnitude_loss and self.magnitude_loss_type == "margin":
-            log_fn("matched_mag", self._last_matched_mag, on_step=True, prog_bar=False)
-            log_fn("unmatched_mag", self._last_unmatched_mag, on_step=True, prog_bar=False)
-            log_fn("mag_diff", self._last_matched_mag - self._last_unmatched_mag, on_step=True, prog_bar=False)
-        
-        log_fn("loss_total", total_loss, on_step=True, prog_bar=True)
-        
-        return total_loss
+        total_loss += weighted_loss
+        log_fn(key, value, on_step=True, prog_bar=True)
+    
+    # ADD THIS BLOCK - Log magnitude stats
+    if self.use_magnitude_loss and self.magnitude_loss_type == "margin":
+        log_fn("matched_mag", self._last_matched_mag, 
+               on_step=True, prog_bar=True)
+        log_fn("unmatched_mag", self._last_unmatched_mag, 
+               on_step=True, prog_bar=True)
+        mag_diff = self._last_matched_mag - self._last_unmatched_mag
+        log_fn("mag_diff", mag_diff, on_step=True, prog_bar=True)
+    
+    log_fn("loss_total", total_loss, on_step=True, prog_bar=True)
+    
+    return total_loss
