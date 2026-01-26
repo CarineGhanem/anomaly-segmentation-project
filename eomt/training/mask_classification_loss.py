@@ -34,9 +34,6 @@ class MaskClassificationLoss(nn.Module):
         magnitude_loss_type: str = "margin",  # "margin", "hinge", or "mse"
         magnitude_threshold: float = 2.0,  # For hinge loss (higher than before)
         magnitude_margin: float = 2.0,  # For margin loss
-        # Adaptive temperature (kept for compatibility)
-        use_adaptive_temperature: bool = False,
-        adaptive_temp_range: tuple = (0.1, 1.0),
     ):
         super().__init__()
         
@@ -70,9 +67,6 @@ class MaskClassificationLoss(nn.Module):
         if magnitude_loss_type not in allowed_types:
             raise ValueError(f"magnitude_loss_type must be one of {allowed_types}, got {magnitude_loss_type}")
         
-        # Adaptive temperature
-        self.use_adaptive_temperature = use_adaptive_temperature
-        self.adaptive_temp_range = adaptive_temp_range
         
         # Class weights with no-object class
         empty_weight = torch.ones(num_labels + 1)
@@ -80,7 +74,6 @@ class MaskClassificationLoss(nn.Module):
         self.register_buffer("empty_weight", empty_weight)
         
         # For logging/debugging
-        self.register_buffer("_last_adaptive_temp", torch.tensor(logit_norm_temp))
         self.register_buffer("_last_matched_mag", torch.tensor(0.0))
         self.register_buffer("_last_unmatched_mag", torch.tensor(0.0))
 
@@ -117,43 +110,6 @@ class MaskClassificationLoss(nn.Module):
         # L2 normalize and scale by temperature
         norm = torch.norm(class_logits, p=2, dim=-1, keepdim=True)
         return class_logits / (norm + eps) / temp
-
-    def compute_adaptive_temperature(
-        self,
-        class_logits: torch.Tensor,
-        indices: List[tuple]
-    ) -> float:
-        """Compute adaptive temperature based on prediction confidence."""
-        if not self.use_adaptive_temperature:
-            return self.logit_norm_temp
-        
-        # Collect logits for matched predictions
-        matched_logits = []
-        for i, (src_idx, tgt_idx) in enumerate(indices):
-            if len(src_idx) > 0:
-                max_logits = class_logits[i, src_idx, :-1].max(dim=-1)[0]
-                matched_logits.append(max_logits)
-        
-        if len(matched_logits) == 0:
-            return self.adaptive_temp_range[1]
-        
-        # Compute mean confidence
-        all_matched = torch.cat(matched_logits)
-        mean_max_logit = all_matched.mean()
-        
-        # Map logit magnitude to temperature
-        confidence_score = torch.sigmoid(mean_max_logit / 10.0)
-        
-        # Linear interpolation
-        min_temp, max_temp = self.adaptive_temp_range
-        adaptive_temp = max_temp + (min_temp - max_temp) * confidence_score
-        
-        # Store for logging
-        self._last_adaptive_temp.copy_(adaptive_temp.detach())
-        
-        return adaptive_temp.item()
-    
-
 
     def compute_magnitude_regularizer(self, class_logits, indices):
         """Dispatch to appropriate magnitude loss type."""
@@ -557,15 +513,6 @@ class MaskClassificationLoss(nn.Module):
             gt_labels
         )
         
-        # Compute adaptive temperature if enabled
-        if self.use_adaptive_temperature:
-            adaptive_temp = self.compute_adaptive_temperature(
-                class_queries_logits,
-                indices
-            )
-        else:
-            adaptive_temp = None
-        
         # Initialize losses
         losses = {}
         
@@ -573,7 +520,6 @@ class MaskClassificationLoss(nn.Module):
         class_logits_norm = self.apply_logit_norm(
             class_queries_logits,
             context="ce",
-            temperature=adaptive_temp
         )
         
         # Prepare target classes

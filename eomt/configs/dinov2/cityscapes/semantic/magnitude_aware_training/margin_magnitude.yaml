@@ -1,9 +1,8 @@
 # ===============================================================
-# ABLATION 3: Adaptive Temperature + Magnitude Loss
-# Tests: Does adaptive calibration help across different datasets?
+# IMPROVED: Margin-Based Magnitude Loss
+# Uses relative comparison instead of absolute threshold
+# Should fix RoadObstacle21 issue while maintaining other performance
 # ===============================================================
-# Hypothesis: Adaptive temperature adjusts normalization strength
-# based on model confidence, preserving magnitude when uncertain
 
 trainer:
   max_epochs: 20
@@ -11,7 +10,7 @@ trainer:
   accumulate_grad_batches: 8
   gradient_clip_val: 0.01
   gradient_clip_algorithm: "norm"
-  log_every_n_steps: 50
+  log_every_n_steps: 20
   check_val_every_n_epoch: 1
   enable_model_summary: False
   devices: 1
@@ -21,12 +20,12 @@ trainer:
     init_args:
       resume: allow
       project: "eomt"
-      name: "cs_eomt_ablation3_adaptive_temp_magnitude"
+      name: "cs_eomt_margin_magnitude_improved"
 
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        dirpath: "outputs/ablation3_adaptive_temp_magnitude"
+        dirpath: "outputs/margin_magnitude_improved"
         filename: "best-{epoch:02d}-{metrics/val_iou_all:.4f}"
         monitor: "metrics/val_iou_all"
         mode: "max"
@@ -44,29 +43,25 @@ model:
     attn_mask_annealing_start_steps: [3317, 8292, 13268]
     attn_mask_annealing_end_steps: [6634, 11609, 16585]
 
-    # LogitNorm with adaptive temperature
+    # LogitNorm: CE-only (as before)
     use_logit_norm: True
-    logit_norm_temp: 0.5 # Base temperature
+    logit_norm_temp: 0.5
     logit_norm_mode: "ce"
 
-    # Adaptive temperature: ENABLED
-    use_adaptive_temperature: True
-    adaptive_temp_range: [0.1, 1.0] # [min_temp, max_temp]
-    # Low confidence → temp closer to 1.0 (less normalization)
-    # High confidence → temp closer to 0.1 (more normalization)
-
-    # Magnitude-aware calibration: ENABLED
+    # IMPROVED: Margin-based magnitude loss
     use_magnitude_loss: True
-    magnitude_coefficient: 0.5
-    magnitude_threshold: 1.0
+    magnitude_loss_type: "margin" # NEW: margin instead of mse
+    magnitude_coefficient: 0.3 # Reduced from 0.5 (let it be gentler)
+    magnitude_margin: 2.0 # NEW: Matched should be 2.0 higher than unmatched
+    # magnitude_threshold: Not used for margin loss
 
     # Stage control
-    finetune_stage: "A_class_only"
+    finetune_stage: "A_head"
     train_heads_in_stage_b: True
     train_heads_in_stage_c: True
 
     # Checkpoint loading
-    ckpt_path: "/content/drive/MyDrive/eomt_cityscapes.bin"
+    ckpt_path: "/path/to/eomt_cityscapes.bin" # UPDATE THIS
     delta_weights: False
     load_ckpt_class_head: False
 

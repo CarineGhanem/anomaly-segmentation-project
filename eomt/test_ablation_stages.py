@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test script for validating magnitude-aware calibration setup locally.
-Tests parameter freezing, LogitNorm modes, magnitude loss, and adaptive temperature.
+Tests parameter freezing, LogitNorm modes, and magnitude loss.
 """
 
 import torch
@@ -81,8 +81,6 @@ def test_stage_freezing(stage_name: str):
             use_magnitude_loss=False,
             magnitude_coefficient=0.5,
             magnitude_threshold=1.0,
-            use_adaptive_temperature=False,
-            adaptive_temp_range=(0.1, 1.0),
         )
     except Exception as e:
         logger.error(f"Failed to create model: {e}")
@@ -304,96 +302,6 @@ def test_magnitude_loss():
     return success
 
 
-def test_adaptive_temperature():
-    """Test adaptive temperature computation."""
-    logger.info(f"\n{'='*70}")
-    logger.info("TESTING ADAPTIVE TEMPERATURE")
-    logger.info('='*70)
-    
-    from training.mask_classification_loss import MaskClassificationLoss
-    
-    # Create loss with adaptive temperature enabled
-    criterion = MaskClassificationLoss(
-        num_points=512,
-        oversample_ratio=3.0,
-        importance_sample_ratio=0.75,
-        mask_coefficient=5.0,
-        dice_coefficient=5.0,
-        class_coefficient=2.0,
-        num_labels=19,
-        no_object_coefficient=0.1,
-        use_logit_norm=True,
-        logit_norm_temp=0.5,
-        logit_norm_mode="ce",
-        use_adaptive_temperature=True,
-        adaptive_temp_range=(0.1, 1.0),
-    )
-    
-    # Test case 1: High confidence (should get low temperature)
-    logger.info("\n--- Test 1: High confidence predictions ---")
-    high_conf_logits = torch.tensor([
-        [[10.0, 2.0, 1.0, 0.5] for _ in range(10)],
-        [[9.5, 1.8, 1.2, 0.3] for _ in range(10)],
-    ])  # [B=2, Q=10, C+1=4]
-    
-    indices_high = [
-        (torch.tensor([0, 1, 2], dtype=torch.long), torch.tensor([0, 1, 2], dtype=torch.long)),
-        (torch.tensor([0, 1], dtype=torch.long), torch.tensor([0, 1], dtype=torch.long)),
-    ]
-    
-    temp_high = criterion.compute_adaptive_temperature(high_conf_logits, indices_high)
-    logger.info(f"  High confidence → Temperature: {temp_high:.4f}")
-    logger.info(f"  Expected: Close to {criterion.adaptive_temp_range[0]} (low temp)")
-    
-    # Test case 2: Low confidence (should get high temperature)
-    logger.info("\n--- Test 2: Low confidence predictions ---")
-    low_conf_logits = torch.tensor([
-        [[2.0, 1.8, 1.5, 1.2] for _ in range(10)],
-        [[2.5, 2.2, 1.9, 1.6] for _ in range(10)],
-    ])
-    
-    indices_low = [
-        (torch.tensor([0, 1], dtype=torch.long), torch.tensor([0, 1], dtype=torch.long)),
-        (torch.tensor([0], dtype=torch.long), torch.tensor([0], dtype=torch.long)),
-    ]
-    
-    temp_low = criterion.compute_adaptive_temperature(low_conf_logits, indices_low)
-    logger.info(f"  Low confidence → Temperature: {temp_low:.4f}")
-    logger.info(f"  Expected: Close to {criterion.adaptive_temp_range[1]} (high temp)")
-    
-    # Test case 3: No matches (should get max temperature)
-    logger.info("\n--- Test 3: No matches ---")
-    no_match_logits = torch.randn(2, 10, 4)
-    indices_empty = [
-        (torch.tensor([], dtype=torch.long), torch.tensor([], dtype=torch.long)),
-        (torch.tensor([], dtype=torch.long), torch.tensor([], dtype=torch.long)),
-    ]
-    
-    temp_empty = criterion.compute_adaptive_temperature(no_match_logits, indices_empty)
-    logger.info(f"  No matches → Temperature: {temp_empty:.4f}")
-    logger.info(f"  Expected: {criterion.adaptive_temp_range[1]} (max temp)")
-    
-    # Verify behavior
-    min_temp, max_temp = criterion.adaptive_temp_range
-    success = (
-        min_temp <= temp_high <= max_temp and
-        min_temp <= temp_low <= max_temp and
-        temp_high < temp_low and  # High confidence should have lower temp
-        abs(temp_empty - max_temp) < 0.01  # No matches should be max temp
-    )
-    
-    if success:
-        logger.info("\n✓ Adaptive temperature behaves correctly")
-    else:
-        logger.warning("\n✗ Adaptive temperature behavior unexpected")
-    
-    logger.info(f"\n{'='*70}")
-    logger.info(f"Adaptive Temperature: {'✓ PASSED' if success else '✗ FAILED'}")
-    logger.info('='*70 + '\n')
-    
-    return success
-
-
 def test_full_loss_computation():
     """Test full loss computation with all magnitude-aware features."""
     logger.info(f"\n{'='*70}")
@@ -402,21 +310,13 @@ def test_full_loss_computation():
     
     from training.mask_classification_loss import MaskClassificationLoss
     
-    # Test both configurations
+    # Test configurations
     configs = [
         {
             "name": "LogitNorm CE-only + Magnitude (Ablation 2)",
             "use_logit_norm": True,
             "logit_norm_mode": "ce",
             "use_magnitude_loss": True,
-            "use_adaptive_temperature": False,
-        },
-        {
-            "name": "Adaptive Temp + Magnitude (Ablation 3)",
-            "use_logit_norm": True,
-            "logit_norm_mode": "ce",
-            "use_magnitude_loss": True,
-            "use_adaptive_temperature": True,
         },
     ]
     
@@ -441,8 +341,6 @@ def test_full_loss_computation():
             use_magnitude_loss=config["use_magnitude_loss"],
             magnitude_coefficient=0.5,
             magnitude_threshold=1.0,
-            use_adaptive_temperature=config["use_adaptive_temperature"],
-            adaptive_temp_range=(0.1, 1.0),
         )
         
         # Create dummy data
@@ -554,7 +452,6 @@ def test_backward_compatibility():
             logit_norm_mode="ce",
             use_magnitude_loss=True,  # Only magnitude loss
             magnitude_coefficient=0.5,
-            # No adaptive temperature
         )
         logger.info("  ✓ Partial new features work")
         partial_works = True
@@ -598,21 +495,15 @@ def main():
     logger.info("="*70)
     results["magnitude_loss"] = test_magnitude_loss()
     
-    # Test 4: Adaptive temperature
+    # Test 4: Full loss computation
     logger.info("\n" + "="*70)
-    logger.info("PART 4: ADAPTIVE TEMPERATURE TESTS")
-    logger.info("="*70)
-    results["adaptive_temperature"] = test_adaptive_temperature()
-    
-    # Test 5: Full loss computation
-    logger.info("\n" + "="*70)
-    logger.info("PART 5: FULL LOSS COMPUTATION TESTS")
+    logger.info("PART 4: FULL LOSS COMPUTATION TESTS")
     logger.info("="*70)
     results["full_loss_computation"] = test_full_loss_computation()
     
-    # Test 6: Backward compatibility
+    # Test 5: Backward compatibility
     logger.info("\n" + "="*70)
-    logger.info("PART 6: BACKWARD COMPATIBILITY TESTS")
+    logger.info("PART 5: BACKWARD COMPATIBILITY TESTS")
     logger.info("="*70)
     results["backward_compatibility"] = test_backward_compatibility()
     

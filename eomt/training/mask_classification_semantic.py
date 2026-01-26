@@ -49,8 +49,6 @@ class MaskClassificationSemantic(LightningModule):
         use_magnitude_loss: bool = False,
         magnitude_coefficient: float = 0.5,
         magnitude_threshold: float = 1.0,
-        use_adaptive_temperature: bool = False,
-        adaptive_temp_range: tuple = (0.1, 1.0),
         magnitude_loss_type: str = "margin",  # NEW
         magnitude_margin: float = 2.0,  # NEW
         # Fine-tuning stage parameters
@@ -108,10 +106,7 @@ class MaskClassificationSemantic(LightningModule):
             magnitude_coefficient=magnitude_coefficient,
             magnitude_loss_type=magnitude_loss_type,
             magnitude_margin=magnitude_margin,
-            magnitude_threshold=magnitude_threshold,
-            use_adaptive_temperature=use_adaptive_temperature,
-            adaptive_temp_range=adaptive_temp_range,
-            
+            magnitude_threshold=magnitude_threshold,            
         )
         
         # Store settings for logging
@@ -120,7 +115,6 @@ class MaskClassificationSemantic(LightningModule):
         self.logit_norm_mode = logit_norm_mode
         self.use_magnitude_loss = use_magnitude_loss
         self.magnitude_coefficient = magnitude_coefficient
-        self.use_adaptive_temperature = use_adaptive_temperature
         
         # Log configuration
         logging.info(f"\n{'='*60}")
@@ -129,9 +123,6 @@ class MaskClassificationSemantic(LightningModule):
         if use_logit_norm:
             logging.info(f"    Temperature: {logit_norm_temp}")
             logging.info(f"    Mode: {logit_norm_mode}")
-            logging.info(f"    Adaptive: {use_adaptive_temperature}")
-            if use_adaptive_temperature:
-                logging.info(f"    Temp Range: {adaptive_temp_range}")
         logging.info(f"  Magnitude Loss: {use_magnitude_loss}")
         if use_magnitude_loss:
             logging.info(f"    Coefficient: {magnitude_coefficient}")
@@ -141,7 +132,7 @@ class MaskClassificationSemantic(LightningModule):
         # Initialize metrics
         num_metric_blocks = self.network.num_blocks + 1 if self.network.masked_attn_enabled else 1
         self.init_metrics_semantic(ignore_idx, num_metric_blocks)
-        
+
     def training_step(self, batch, batch_idx):
         """Training step with safe magnitude logging."""
         imgs, targets = batch

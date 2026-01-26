@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CKPT="/Users/kgun/Documents/Polito/Advanced ML/project/anomaly-segmentation-project/trained_models/hinge_mg_logit_ce_task_heads.ckpt"
+CKPT="../../trained_models/hinge_mg_logit_ce_task_heads.ckpt"
 CFG="../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml"
 SAVE_DIR="./saved_logits"
 RESULTS="hinge_mg_logit_ce_task_heads.txt"

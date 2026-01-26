@@ -1,60 +1,51 @@
-# ===============================================================
-# ABLATION 2: LogitNorm (CE-only) + Magnitude Loss
-# Tests: Does combining calibration with magnitude regularization
-#        give the best of both worlds?
-# ===============================================================
-# Hypothesis: LogitNorm reduces overconfidence on known classes,
-# while magnitude loss preserves OOD discrimination signal
+# configs/ablation_ln_stageA_classonly_20ep_A100_bs4_acc8.yaml
 
 trainer:
   max_epochs: 20
+
+  # --- GPU (A100) setup ---
+  accelerator: "gpu"
+  devices: 1
+  strategy: "auto"
   precision: "16-mixed"
+
+  # Effective batch = 4 * 8 = 32
   accumulate_grad_batches: 8
+
   gradient_clip_val: 0.01
   gradient_clip_algorithm: "norm"
+
   log_every_n_steps: 20
   check_val_every_n_epoch: 1
   enable_model_summary: False
-  devices: 1
+
+  # Full validation for the real run
+  limit_val_batches: 1.0
 
   logger:
     class_path: lightning.pytorch.loggers.wandb.WandbLogger
     init_args:
       resume: allow
       project: "eomt"
-      name: "cs_eomt_ablation2_logitnorm_ce_magnitude"
-
-  callbacks:
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        dirpath: "outputs/ablation2_logitnorm_ce_magnitude"
-        filename: "best-{epoch:02d}-{metrics/val_iou_all:.4f}"
-        monitor: "metrics/val_iou_all"
-        mode: "max"
-        save_top_k: 1
-        save_last: True
-        verbose: True
+      name: "cs_eomt_ln_stageA_classonly_A100_bs4_acc8_10ep_lr0005"
 
 model:
   class_path: training.mask_classification_semantic.MaskClassificationSemantic
   init_args:
+    # Image and class config
     img_size: [1024, 1024]
     num_classes: 19
 
+    # Attention mask annealing
+    # Scaled for ~14880 total steps (batch 4 -> ~744 steps/epoch; *20 -> ~14880)
     attn_mask_annealing_enabled: True
-    attn_mask_annealing_start_steps: [3317, 8292, 13268]
-    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+    attn_mask_annealing_start_steps: [0, 4960, 9920]
+    attn_mask_annealing_end_steps: [4960, 9920, 14880]
 
-    # LogitNorm: CE-only mode
+    # LogitNorm settings
     use_logit_norm: True
     logit_norm_temp: 0.5
-    logit_norm_mode: "ce" # CRITICAL: Only apply to CE loss, not matching
-
-    # Magnitude-aware calibration: ENABLED
-    use_magnitude_loss: True
-    magnitude_loss_type: "mse"
-    magnitude_coefficient: 0.5 # Moderate weight alongside LogitNorm
-    magnitude_threshold: 1.0
+    logit_norm_mode: "both" # Apply LogitNorm during matching and CE loss
 
     # Stage control
     finetune_stage: "A_class_only"
@@ -66,14 +57,19 @@ model:
     delta_weights: False
     load_ckpt_class_head: False
 
-    # Optimizer
+    # Optimizer control
     lr: 0.0005
     weight_decay: 0.01
-    llrd: 0.8
-    llrd_l2_enabled: True
+
+    llrd: 1.0
+    llrd_l2_enabled: False
+
     lr_mult: 1.0
     poly_power: 0.9
-    warmup_steps: [100, 200]
+
+    # Warmup scaled for the longer run; keep list type
+    # Roughly ~2% and ~4% of total steps
+    warmup_steps: [300, 600]
 
     # Loss coefficients
     mask_coefficient: 5.0
@@ -83,14 +79,24 @@ model:
     mask_thresh: 0.8
     overlap_thresh: 0.8
 
+    # Sampling for loss
     num_points: 12544
     oversample_ratio: 3.0
     importance_sample_ratio: 0.75
+
+    # Semantic specific
     ignore_idx: 255
 
+    # LoRA config (disabled for Stage A)
     lora:
       enabled: False
+      rank: 4
+      alpha: 16
+      dropout: 0.0
+      target_modules: ["q_proj", "v_proj"]
+      last_n_blocks: 2
 
+    # Network architecture
     network:
       class_path: models.eomt.EoMT
       init_args:
@@ -103,3 +109,6 @@ model:
 
 data:
   class_path: datasets.cityscapes_semantic.CityscapesSemantic
+  init_args:
+    batch_size: 8
+    num_workers: 8

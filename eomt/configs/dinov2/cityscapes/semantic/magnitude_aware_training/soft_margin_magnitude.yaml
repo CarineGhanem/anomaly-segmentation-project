@@ -50,13 +50,9 @@ model:
 
     # IMPROVED: Margin-based magnitude loss
     use_magnitude_loss: True
-    magnitude_loss_type: "margin" # NEW: margin instead of mse
-    magnitude_coefficient: 0.3 # Reduced from 0.5 (let it be gentler)
-    magnitude_margin: 2.0 # NEW: Matched should be 2.0 higher than unmatched
-    # magnitude_threshold: Not used for margin loss
-
-    # Adaptive temperature: Disabled for now
-    use_adaptive_temperature: False
+    magnitude_loss_type: "soft_margin" # Change from "margin"
+    magnitude_coefficient: 0.3 # Can be lower since always active
+    magnitude_margin: 6.0 # Target separation
 
     # Stage control
     finetune_stage: "A_head"

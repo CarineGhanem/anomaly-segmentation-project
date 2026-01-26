@@ -1,8 +1,10 @@
 # ===============================================================
-# IMPROVED: Margin-Based Magnitude Loss
-# Uses relative comparison instead of absolute threshold
-# Should fix RoadObstacle21 issue while maintaining other performance
+# ABLATION 2: LogitNorm (CE-only) + Magnitude Loss
+# Tests: Does combining calibration with magnitude regularization
+#        give the best of both worlds?
 # ===============================================================
+# Hypothesis: LogitNorm reduces overconfidence on known classes,
+# while magnitude loss preserves OOD discrimination signal
 
 trainer:
   max_epochs: 20
@@ -20,12 +22,12 @@ trainer:
     init_args:
       resume: allow
       project: "eomt"
-      name: "cs_eomt_margin_magnitude_improved"
+      name: "cs_eomt_ablation2_logitnorm_ce_magnitude"
 
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        dirpath: "outputs/margin_magnitude_improved"
+        dirpath: "outputs/ablation2_logitnorm_ce_magnitude"
         filename: "best-{epoch:02d}-{metrics/val_iou_all:.4f}"
         monitor: "metrics/val_iou_all"
         mode: "max"
@@ -43,19 +45,16 @@ model:
     attn_mask_annealing_start_steps: [3317, 8292, 13268]
     attn_mask_annealing_end_steps: [6634, 11609, 16585]
 
-    # LogitNorm: CE-only (as before)
+    # LogitNorm: CE-only mode
     use_logit_norm: True
     logit_norm_temp: 0.5
-    logit_norm_mode: "ce"
+    logit_norm_mode: "ce" # CRITICAL: Only apply to CE loss, not matching
 
-    # IMPROVED: Margin-based magnitude loss
+    # Magnitude-aware calibration: ENABLED
     use_magnitude_loss: True
-    magnitude_loss_type: "soft_margin" # Change from "margin"
-    magnitude_coefficient: 0.3 # Can be lower since always active
-    magnitude_margin: 6.0 # Target separation
-
-    # Adaptive temperature: Disabled for now
-    use_adaptive_temperature: False
+    magnitude_loss_type: "mse"
+    magnitude_coefficient: 0.5 # Moderate weight alongside LogitNorm
+    magnitude_threshold: 1.0
 
     # Stage control
     finetune_stage: "A_head"
@@ -63,7 +62,7 @@ model:
     train_heads_in_stage_c: True
 
     # Checkpoint loading
-    ckpt_path: "/path/to/eomt_cityscapes.bin" # UPDATE THIS
+    ckpt_path: "/content/drive/MyDrive/eomt_cityscapes.bin"
     delta_weights: False
     load_ckpt_class_head: False
 

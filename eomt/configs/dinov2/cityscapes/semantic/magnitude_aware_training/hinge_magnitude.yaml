@@ -55,9 +55,6 @@ model:
     magnitude_threshold: 2.0 # Higher than before (was 1.0)
     # magnitude_margin: Not used for hinge loss
 
-    # Adaptive temperature: Disabled for now
-    use_adaptive_temperature: False
-
     # Stage control
     finetune_stage: "A_head"
     train_heads_in_stage_b: True
