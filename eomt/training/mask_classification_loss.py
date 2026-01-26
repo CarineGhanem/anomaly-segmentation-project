@@ -66,7 +66,7 @@ class MaskClassificationLoss(nn.Module):
         self.magnitude_margin = magnitude_margin
         
         # Validate magnitude_loss_type
-        allowed_types = {"margin", "hinge", "mse"}
+        allowed_types = {"margin", "hinge", "mse", "soft_margin"}
         if magnitude_loss_type not in allowed_types:
             raise ValueError(f"magnitude_loss_type must be one of {allowed_types}, got {magnitude_loss_type}")
         
@@ -637,36 +637,36 @@ class MaskClassificationLoss(nn.Module):
         
         return losses
 
-    # In mask_classification_loss.py, update loss_total():
+ # In mask_classification_loss.py, update loss_total():
 
-def loss_total(self, losses_dict: Dict[str, torch.Tensor], log_fn) -> torch.Tensor:
-    """Compute total weighted loss."""
-    total_loss = 0.0
-    
-    for key, value in losses_dict.items():
-        if "loss_ce" in key:
-            weighted_loss = value * self.class_coefficient
-        elif "loss_mask" in key:
-            weighted_loss = value * self.mask_coefficient
-        elif "loss_dice" in key:
-            weighted_loss = value * self.dice_coefficient
-        elif "loss_magnitude" in key:
-            weighted_loss = value * self.magnitude_coefficient
-        else:
-            weighted_loss = value
+    def loss_total(self, losses_dict: Dict[str, torch.Tensor], log_fn) -> torch.Tensor:
+        """Compute total weighted loss."""
+        total_loss = 0.0
         
-        total_loss += weighted_loss
-        log_fn(key, value, on_step=True, prog_bar=True)
-    
-    # ADD THIS BLOCK - Log magnitude stats
-    if self.use_magnitude_loss and self.magnitude_loss_type == "margin":
-        log_fn("matched_mag", self._last_matched_mag, 
-               on_step=True, prog_bar=True)
-        log_fn("unmatched_mag", self._last_unmatched_mag, 
-               on_step=True, prog_bar=True)
-        mag_diff = self._last_matched_mag - self._last_unmatched_mag
-        log_fn("mag_diff", mag_diff, on_step=True, prog_bar=True)
-    
-    log_fn("loss_total", total_loss, on_step=True, prog_bar=True)
-    
-    return total_loss
+        for key, value in losses_dict.items():
+            if "loss_ce" in key:
+                weighted_loss = value * self.class_coefficient
+            elif "loss_mask" in key:
+                weighted_loss = value * self.mask_coefficient
+            elif "loss_dice" in key:
+                weighted_loss = value * self.dice_coefficient
+            elif "loss_magnitude" in key:
+                weighted_loss = value * self.magnitude_coefficient
+            else:
+                weighted_loss = value
+            
+            total_loss += weighted_loss
+            log_fn(key, value, on_step=True, prog_bar=True)
+        
+        # ADD THIS BLOCK - Log magnitude stats
+        if self.use_magnitude_loss and self.magnitude_loss_type == "margin":
+            log_fn("matched_mag", self._last_matched_mag, 
+                on_step=True, prog_bar=True)
+            log_fn("unmatched_mag", self._last_unmatched_mag, 
+                on_step=True, prog_bar=True)
+            mag_diff = self._last_matched_mag - self._last_unmatched_mag
+            log_fn("mag_diff", mag_diff, on_step=True, prog_bar=True)
+        
+        log_fn("loss_total", total_loss, on_step=True, prog_bar=True)
+        
+        return total_loss
