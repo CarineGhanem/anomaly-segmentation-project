@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CKPT="/Users/kgun/Documents/Polito/Advanced ML/project/anomaly-segmentation-project/trained_models/magnitude_and_class_heads_only.ckpt"
+CKPT="/Users/kgun/Documents/Polito/Advanced ML/project/anomaly-segmentation-project/trained_models/hinge_mg_logit_ce_task_heads.ckpt"
 CFG="../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml"
 SAVE_DIR="./saved_logits"
-RESULTS="magnitude_class_heads_only.txt"
+RESULTS="hinge_mg_logit_ce_task_heads.txt"
 
 python extract_logits.py \
   --input "../../Validation_Dataset/RoadAnomaly21/images/*.png" \

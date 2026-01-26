@@ -231,3 +231,5 @@ Validation_Dataset/
 
 trained_models/
 *.ckpt
+
+*.txt
