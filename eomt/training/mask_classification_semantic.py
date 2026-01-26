@@ -51,6 +51,8 @@ class MaskClassificationSemantic(LightningModule):
         magnitude_threshold: float = 1.0,
         use_adaptive_temperature: bool = False,
         adaptive_temp_range: tuple = (0.1, 1.0),
+        magnitude_loss_type: str = "margin",  # NEW
+        magnitude_margin: float = 2.0,  # NEW
         # Fine-tuning stage parameters
         finetune_stage: str = "full",
         lora: Optional[dict] = None,
@@ -104,9 +106,12 @@ class MaskClassificationSemantic(LightningModule):
             # NEW: Magnitude-aware calibration
             use_magnitude_loss=use_magnitude_loss,
             magnitude_coefficient=magnitude_coefficient,
+            magnitude_loss_type=magnitude_loss_type,
+            magnitude_margin=magnitude_margin,
             magnitude_threshold=magnitude_threshold,
             use_adaptive_temperature=use_adaptive_temperature,
             adaptive_temp_range=adaptive_temp_range,
+            
         )
         
         # Store settings for logging

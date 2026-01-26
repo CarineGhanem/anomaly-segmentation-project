@@ -1,0 +1,107 @@
+# ===============================================================
+# IMPROVED: Hinge-Based Magnitude Loss
+# Only penalizes magnitudes above threshold (more flexible)
+# Alternative approach to margin loss
+# ===============================================================
+
+trainer:
+  max_epochs: 20
+  precision: "16-mixed"
+  accumulate_grad_batches: 8
+  gradient_clip_val: 0.01
+  gradient_clip_algorithm: "norm"
+  log_every_n_steps: 50
+  check_val_every_n_epoch: 1
+  enable_model_summary: False
+  devices: 1
+
+  logger:
+    class_path: lightning.pytorch.loggers.wandb.WandbLogger
+    init_args:
+      resume: allow
+      project: "eomt"
+      name: "cs_eomt_hinge_magnitude_improved"
+
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        dirpath: "outputs/hinge_magnitude_improved"
+        filename: "best-{epoch:02d}-{metrics/val_iou_all:.4f}"
+        monitor: "metrics/val_iou_all"
+        mode: "max"
+        save_top_k: 1
+        save_last: True
+        verbose: True
+
+model:
+  class_path: training.mask_classification_semantic.MaskClassificationSemantic
+  init_args:
+    img_size: [1024, 1024]
+    num_classes: 19
+
+    attn_mask_annealing_enabled: True
+    attn_mask_annealing_start_steps: [3317, 8292, 13268]
+    attn_mask_annealing_end_steps: [6634, 11609, 16585]
+
+    # LogitNorm: CE-only (as before)
+    use_logit_norm: True
+    logit_norm_temp: 0.5
+    logit_norm_mode: "ce"
+
+    # IMPROVED: Hinge-based magnitude loss
+    use_magnitude_loss: True
+    magnitude_loss_type: "hinge" # NEW: hinge instead of mse
+    magnitude_coefficient: 0.3 # Reduced from 0.5
+    magnitude_threshold: 2.0 # Higher than before (was 1.0)
+    # magnitude_margin: Not used for hinge loss
+
+    # Adaptive temperature: Disabled for now
+    use_adaptive_temperature: False
+
+    # Stage control
+    finetune_stage: "A_head"
+    train_heads_in_stage_b: True
+    train_heads_in_stage_c: True
+
+    # Checkpoint loading
+    ckpt_path: "/path/to/eomt_cityscapes.bin" # UPDATE THIS
+    delta_weights: False
+    load_ckpt_class_head: False
+
+    # Optimizer
+    lr: 0.0005
+    weight_decay: 0.01
+    llrd: 0.8
+    llrd_l2_enabled: True
+    lr_mult: 1.0
+    poly_power: 0.9
+    warmup_steps: [100, 200]
+
+    # Loss coefficients
+    mask_coefficient: 5.0
+    dice_coefficient: 5.0
+    class_coefficient: 2.0
+    no_object_coefficient: 0.1
+    mask_thresh: 0.8
+    overlap_thresh: 0.8
+
+    num_points: 12544
+    oversample_ratio: 3.0
+    importance_sample_ratio: 0.75
+    ignore_idx: 255
+
+    lora:
+      enabled: False
+
+    network:
+      class_path: models.eomt.EoMT
+      init_args:
+        num_q: 100
+        num_blocks: 3
+        encoder:
+          class_path: models.vit.ViT
+          init_args:
+            backbone_name: vit_base_patch14_reg4_dinov2
+
+data:
+  class_path: datasets.cityscapes_semantic.CityscapesSemantic
