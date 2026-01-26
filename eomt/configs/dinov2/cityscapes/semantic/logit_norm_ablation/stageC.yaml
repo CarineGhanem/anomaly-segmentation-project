@@ -48,7 +48,7 @@ model:
     # LogitNorm settings
     use_logit_norm: True
     logit_norm_temp: 0.5 # Increased from 0.1 to reduce distribution shift
-    logit_norm_mode: "both" # Apply LogitNorm during matching and CE loss
+    logit_norm_mode: "ce" # Apply LogitNorm during matching and CE loss
 
     # Stage control (FLAT keys)
     finetune_stage: "C_lora"

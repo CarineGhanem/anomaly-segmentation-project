@@ -45,7 +45,7 @@ model:
     # LogitNorm settings
     use_logit_norm: True
     logit_norm_temp: 0.5
-    logit_norm_mode: "both" # Apply LogitNorm during matching and CE loss
+    logit_norm_mode: "ce" # Apply LogitNorm during matching and CE loss
 
     # Stage control
     finetune_stage: "A_class_only"

@@ -48,7 +48,7 @@ model:
     # LogitNorm settings
     use_logit_norm: True
     logit_norm_temp: 0.5 # Gentle temperature for FS_LostFound_full/fs_static compatibility
-    logit_norm_mode: "both" # Apply LogitNorm during matching and CE loss
+    logit_norm_mode: "ce" # Apply LogitNorm during matching and CE loss
     # Stage control (FLAT keys)
     finetune_stage: "A_head"
     train_heads_in_stage_b: True # Not used in Stage A, but required
