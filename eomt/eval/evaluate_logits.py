@@ -4,11 +4,11 @@
 # Produces AUPRC + FPR@95 and updates a global results.txt file.
 # ============================================================
 
-#& "D:\python3.11\pyhon3.11\python.exe" evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly21
-#& "D:\python3.11\pyhon3.11\python.exe" evaluate_logits.py --logits_dir ./saved_logits/RoadObsticle21
-#& "D:\python3.11\pyhon3.11\python.exe" evaluate_logits.py --logits_dir ./saved_logits/FS_LostFound_full
-#& "D:\python3.11\pyhon3.11\python.exe" evaluate_logits.py --logits_dir ./saved_logits/fs_static
-#& "D:\python3.11\pyhon3.11\python.exe" evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly
+# python evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly21 --results_file results.txt
+# python evaluate_logits.py --logits_dir ./saved_logits/RoadObsticle21 --results_file results.txt
+# python evaluate_logits.py --logits_dir ./saved_logits/FS_LostFound_full --results_file results.txt
+# python evaluate_logits.py --logits_dir ./saved_logits/fs_static --results_file sresults.txt
+# python evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly --results_file results.txt
 
 import os
 import glob

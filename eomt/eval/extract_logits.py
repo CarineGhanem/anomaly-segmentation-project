@@ -4,19 +4,19 @@
 # Used for offline evaluation (evaluate_logits.py)
 
 # RoadAnomaly21
-#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/RoadAnomaly21/images/*.png" --config "../configs/dinov2/cityscapes/semantic/eomt_large_1024.yaml" --save_dir ./saved_logits
+#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/RoadAnomaly21/images/*.png" --config "../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --save_dir ./saved_logits
 
 # RoadObsticle21
-#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/RoadObsticle21/images/*.webp" --config "../configs/dinov2/cityscapes/semantic/eomt_large_1024.yaml" --save_dir ./saved_logits
+#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/RoadObsticle21/images/*.webp" --config "../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --save_dir ./saved_logits
 
 # FS_LostFound_full
-#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/FS_LostFound_full/images/*.png" --config "../configs/dinov2/cityscapes/semantic/eomt_large_1024.yaml" --save_dir ./saved_logits
+#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/FS_LostFound_full/images/*.png" --config "../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --save_dir ./saved_logits
 
 # fs_static
-#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/fs_static/images/*.jpg" --config "../configs/dinov2/cityscapes/semantic/eomt_large_1024.yaml" --save_dir ./saved_logits
+#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/fs_static/images/*.jpg" --config "../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --save_dir ./saved_logits
 
 # RoadAnomaly
-#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/RoadAnomaly/images/*.jpg" --config "../configs/dinov2/cityscapes/semantic/eomt_large_1024.yaml" --save_dir ./saved_logits
+#& "D:\python3.11\pyhon3.11\python.exe" extract_logits.py --input "../../../Validation_Dataset/Validation_Dataset/RoadAnomaly/images/*.jpg" --config "../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --save_dir ./saved_logits
 # ============================================================
 
 import os
