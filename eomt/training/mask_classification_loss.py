@@ -72,10 +72,7 @@ class MaskClassificationLoss(nn.Module):
         empty_weight = torch.ones(num_labels + 1)
         empty_weight[-1] = no_object_coefficient
         self.register_buffer("empty_weight", empty_weight)
-        
-        # For logging/debugging
-        self.register_buffer("_last_matched_mag", torch.tensor(0.0))
-        self.register_buffer("_last_unmatched_mag", torch.tensor(0.0))
+
 
     def apply_logit_norm(
         self,
@@ -145,15 +142,10 @@ class MaskClassificationLoss(nn.Module):
             unmatched_mags.append(magnitudes[i, unmatched_mask])
         
         if len(matched_mags) == 0:
-            self._last_matched_mag.fill_(0.0)
-            self._last_unmatched_mag.fill_(0.0)
             return torch.tensor(0.0, device=device)
         
         matched_mean = torch.cat(matched_mags).mean()
         unmatched_mean = torch.cat(unmatched_mags).mean()
-        
-        self._last_matched_mag.copy_(matched_mean.detach())
-        self._last_unmatched_mag.copy_(unmatched_mean.detach())
         
         # Soft exponential penalty
         separation = matched_mean - unmatched_mean
@@ -217,10 +209,6 @@ class MaskClassificationLoss(nn.Module):
             matched_mean = torch.cat(matched_mags).mean()
             unmatched_mean = torch.cat(unmatched_mags).mean()
             
-            # Store for logging
-            self._last_matched_mag.copy_(matched_mean.detach())
-            self._last_unmatched_mag.copy_(unmatched_mean.detach())
-            
             # Margin loss: ensure matched > unmatched + margin
             # If difference is already > margin, loss = 0
             # If difference is < margin, penalize
@@ -266,9 +254,6 @@ class MaskClassificationLoss(nn.Module):
         if len(unmatched_mags) == 0:
             return torch.tensor(0.0, device=device)
         
-        # Store for logging
-        self._last_unmatched_mag.copy_(unmatched_mags.mean().detach())
-        
         # Hinge loss: max(0, magnitude - threshold)
         # Only penalize if magnitude exceeds threshold
         loss = F.relu(unmatched_mags - self.magnitude_threshold).mean()
@@ -298,9 +283,7 @@ class MaskClassificationLoss(nn.Module):
         
         if len(unmatched_magnitudes) == 0:
             return torch.tensor(0.0, device=device)
-        
-        # Store for logging
-        self._last_unmatched_mag.copy_(unmatched_magnitudes.mean().detach())
+
         
         # MSE: force magnitudes toward threshold
         target_magnitude = self.magnitude_threshold
