@@ -153,23 +153,14 @@ PyTorch Lightning module defining the EoMT training and validation loops.
 - `mask_classification_semantic.py`\
 Semantic mask-classification logic used for Cityscapes fine-tuning.
 
-- `mask_classification_panoptic.py`\
-Panoptic-style mask-classification components for EoMT.
-
-- `mask_classification_instance.py`\
-Instance-level mask-classification utilities for object-centric training variants.
-
 - `mask_classification_loss.py`\
 Loss functions for mask-based classification and segmentation.
 
-- `lora_utils.py`\
-Utilities for LoRA-based parameter-efficient fine-tuning.
 
 - `two_stage_warmup_poly_schedule.py`\
 Two-stage warmup and polynomial learning-rate schedule.
 
-- `visualization_callback.py`\
-Training callback for real-time visualization of training/validation loss and mIoU.
+
 ## Fine-Tuning
 
 In addition to post-hoc anomaly scoring, this repository includes **training-time fine-tuning of the End-to-End Open-set Mask Transformer (EoMT)** to improve semantic segmentation quality and anomaly detection in open-world road scenes.

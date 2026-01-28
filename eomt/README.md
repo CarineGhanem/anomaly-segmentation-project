@@ -89,3 +89,52 @@ This command evaluates the same `EoMT-L` model using 4 GPUs with a batch size of
 🔧 Replace `/path/to/pytorch_model.bin` with the path to the checkpoint to evaluate.
 
 A [notebook](inference.ipynb) is available for quick inference and visualization with auto-downloaded pre-trained models.
+
+## Fine-tuning EoMT (optional)
+
+Fine-tuning EoMT is configuration-driven and implemented using **PyTorch Lightning**.
+The core training logic is in `eomt/training/lightning_module.py`, while experiment settings are controlled by YAML configuration files.
+
+> **Note:** Fine-tuning is **not used in the core project experiments** and is included as an optional extension.
+
+---
+
+### Key Features
+
+- **Stage-based fine-tuning**: Control which parameters to train via `finetune_stage`
+- **LogitNorm calibration**: Temperature-scaled normalization during training (not applied during inference)
+- **Magnitude-aware training**: Loss variants: `"mse"`, `"margin"`, `"hinge"`, `"soft_margin"`
+- **LoRA support**: Parameter-efficient fine-tuning
+
+---
+
+### 1) Choose a training configuration
+
+Configs are located in: `eomt/configs/dinov2/cityscapes/semantic/`
+
+**Examples:**
+- `eomt_base_640.yaml` – Base setup
+- `logit_norm_ablation/stageA_class_head_only.yaml` – Train classification head only
+- `magnitude_aware_training/*.yaml` – Various magnitude loss configurations
+
+---
+
+### 2) Prepare required paths
+
+You need:
+- **Cityscapes** dataset directory
+- **Pretrained EoMT checkpoint** (e.g., `eomt_cityscapes.bin`)
+
+---
+
+### 3) Run fine-tuning
+
+From the repository root:
+```bash
+cd eomt
+
+python main.py fit \
+  -c "configs/dinov2/cityscapes/semantic/magnitude_aware_training/margin_magnitude.yaml" \
+  --data.init_args.path "/path/to/cityscapes" \
+  --model.init_args.ckpt_path "/path/to/eomt_cityscapes.bin"
+```
