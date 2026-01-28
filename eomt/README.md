@@ -90,6 +90,29 @@ This command evaluates the same `EoMT-L` model using 4 GPUs with a batch size of
 
 A [notebook](inference.ipynb) is available for quick inference and visualization with auto-downloaded pre-trained models.
 
+## EoMT Temperature Search (MSP only)
+
+This script finds the best **temperature** for the **MSP (Maximum Softmax Probability)** anomaly score using
+**saved EoMT logits** exported by `extract_logits.py`.
+### Step 1: Extract logits
+First, generate `.npz` logits files with `extract_logits.py` (this creates the `logits_dir` used below).
+
+
+```bash
+python eomt/eval/extract_logits.py 
+```
+### Step 2: Run temperature search (MSP only)
+```bash
+python eomt/eval/find_optimal_temperature.py \
+  --logits_dir "eomt/eval/saved_logits/<DATASET_NAME>/" \
+  --temp_range "0.5,0.75,1.0,1.1,1.5,2.0"
+```
+
+
+
+
+
+
 ## Fine-tuning EoMT (optional)
 
 Fine-tuning EoMT is configuration-driven and implemented using **PyTorch Lightning**.
