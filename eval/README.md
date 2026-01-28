@@ -1,86 +1,111 @@
-# Anomaly Segmentation Eval
+# ERFNet Evaluation Usage Guide
 
-In this folder you can find some functions to evaluate your model's output. It is designed to load the ERFNet checkpoint so you need to change it when evaluating the EoMT model. The main function to look for is evalAnomaly.py that produces the Anomaly Segmentation results. Other functions could be useful for extensions.
+This guide explains how to use the evaluation scripts in `eval/` for anomaly segmentation with ERFNet.
 
-## Requirements:
+## Scripts
 
-It could work with the default runtime of Colab or other versions of the libraries but these are the requirements this code was tested on.
+The evaluation pipeline consists of:
 
-* [**Python 3.6**](https://www.python.org/): If you don't have Python3.6 in your system, I recommend installing it with [Anaconda](https://www.anaconda.com/download/#linux)
-* [**PyTorch**](http://pytorch.org/): Make sure to install the Pytorch version for Python 3.6 with CUDA support (code only tested for CUDA 8.0 but it should work with higher versions).
-* **Additional Python packages**: numpy, matplotlib, Pillow, torchvision and visdom (optional for --visualize flag)
-* **For testing the anomaly segmentation model**: Road Anomaly, Road Obstacle, and Fishyscapes dataset. All testing images are provided here [Link](https://drive.google.com/file/d/1r2eFANvSlcUjxcerjC8l6dRa0slowMpx/view).
+1. **`evalAnomaly.py`**: Evaluates anomaly detection using post-hoc scoring methods (MSP, Max Logit, Max Entropy)
+2. **`eval_iou.py`**: Evaluates semantic segmentation performance (mIoU) on Cityscapes dataset
+3. **`temperature/save_logits.py`**: Saves model logits for fast temperature scaling evaluation
+4. **`temperature/test_temperatures_fast.py`**: Tests different temperature values on saved logits
 
-## Anomaly Inference:
+## How to Load Checkpoints
 
-* Anomaly Inference Command:```python evalAnomaly.py --input '/home/amarinai/segmentation/unk-dataset/RoadAnomaly21/images/*.png```. Change the dataset path ```'/home/amarinai/segmentation/unk-dataset/RoadAnomaly21/images/*.png```accordingly.
+The script loads ERFNet checkpoints from the `trained_models/` folder by default:
 
-## Functions for evaluating/visualizing the network's output
-
-Currently there are 5 usable functions to evaluate stuff:
-- evalAnomaly
-- eval_cityscapes_color
-- eval_cityscapes_server
-- eval_iou
-- eval_forwardTime
-
-
-## evalAnomaly.py
-
-This code can be used to produce anomaly segmentation results on various anomaly metrics on the validation datasets you can download [here](https://drive.google.com/file/d/1zcayoIIJztxKuHOIjmSjGoQBDy4RdETr/view?usp=drive_link)
-
-**Examples:**
-```
-python evalAnomaly.py --input '/home/amarinai/ViT-Adapter/segmentation/unk-dataset/RoadAnomaly21/images/*.png'
+```bash
+python evalAnomaly.py \
+  --input "datasets/RoadAnomaly21/images/*.png" \
+  --loadDir ../trained_models/ \
+  --loadWeights erfnet_pretrained.pth
 ```
 
-# Code on Citiscapes (probably not needed)
+## Evaluation Datasets
 
-This code can be used to produce segmentation of the Cityscapes images in color for visualization purposes. By default it saves images in eval/save_color/ folder. You can also visualize results in visdom with --visualize flag.
+Evaluation datasets can be downloaded from:
 
-* [**The Cityscapes dataset**](https://www.cityscapes-dataset.com/): Download the "leftImg8bit" for the RGB images and the "gtFine" for the labels. **Please note that for training you should use the "_labelTrainIds" and not the "_labelIds", you can download the [cityscapes scripts](https://github.com/mcordts/cityscapesScripts) and use the [conversor](https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/preparation/createTrainIdLabelImgs.py) to generate trainIds from labelIds**
-## eval_cityscapes_color.py 
+- [SegmentMeIfYouCan](https://segmentmeifyoucan.com/) - RoadAnomaly21 and RoadObstacle21
+- [Fishyscapes](https://fishyscapes.com/) - Lost & Found and Static benchmarks
+- [Road Anomaly Dataset](https://github.com/foolwood/RoadAnomaly) - Original Road Anomaly dataset
+- [Combined validation datasets](https://drive.google.com/file/d/1r2eFANvSlcUjxcerjC8l6dRa0slowMpx/view)
 
-**Options:** Specify the Cityscapes folder path with '--datadir' option. Select the cityscapes subset with '--subset' ('val', 'test', 'train' or 'demoSequence'). For other options check the bottom side of the file.
+Supported datasets:
+- **RoadAnomaly21**: Real street scenes with diverse anomalies
+- **RoadObstacle21**: Road-obstacle scenes where anomalies lie on the roadway
+- **FS_LostFound_full** (Fishyscapes Lost & Found): Real-world road hazards
+- **fs_static** (Fishyscapes Static): Synthetic anomalies pasted into Cityscapes scenes
+- **RoadAnomaly**: Collection of real unusual road hazards
 
-**Examples:**
-```
-python eval_cityscapes_color.py --datadir /home/datasets/cityscapes/ --subset val
-```
+## How to Evaluate Anomaly Detection
 
-## eval_cityscapes_server.py 
+Run `evalAnomaly.py` to compute anomaly detection metrics:
 
-This code can be used to produce segmentation of the Cityscapes images and convert the output indices to the original 'labelIds' so it can be evaluated using the scripts from Cityscapes dataset (evalPixelLevelSemanticLabeling.py) or uploaded to Cityscapes test server. By default it saves images in eval/save_results/ folder.
+```bash
+# MSP (default)
+python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png"
 
-**Options:** Specify the Cityscapes folder path with '--datadir' option. Select the cityscapes subset with '--subset' ('val', 'test', 'train' or 'demoSequence'). For other options check the bottom side of the file.
+# Max Logit
+python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --anomaly_score max_logit
 
-**Examples:**
-```
-python eval_cityscapes_server.py --datadir /home/datasets/cityscapes/ --subset val
-```
-
-## eval_iou.py 
-
-This code can be used to calculate the IoU (mean and per-class) in a subset of images with labels available, like Cityscapes val/train sets.
-
-**Options:** Specify the Cityscapes folder path with '--datadir' option. Select the cityscapes subset with '--subset' ('val' or 'train'). For other options check the bottom side of the file.
-
-**Examples:**
-```
-python eval_iou.py --datadir /home/datasets/cityscapes/ --subset val
+# Max Entropy
+python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --anomaly_score entropy
 ```
 
-## eval_forwardTime.py
-This function loads a model specified by '-m' and enters a loop to continuously estimate forward pass time (fwt) in the specified resolution. 
+The script evaluates post-hoc anomaly scores:
+- **MSP** (Maximum Softmax Probability): `1 - max(softmax(logits))`
+- **Max Logit**: `-max(logits)`
+- **Max Entropy**: `-sum(softmax(logits) * log(softmax(logits)))`
 
-**Options:** Option '--width' specifies the width (default: 1024). Option '--height' specifies the height (default: 512). For other options check the bottom side of the file.
+Metrics reported:
+- **AuPRC** (Area Under Precision-Recall Curve): Higher is better
+- **FPR@95** (False Positive Rate at 95% True Positive Rate): Lower is better
 
-**Examples:**
+Results are saved to `results.txt` with format:
 ```
-python eval_forwardTime.py
+Dataset: RoadAnomaly21 | Method: msp | AuPRC: XX.XX | FPR95: XX.XX
 ```
 
-**NOTE**: The pytorch code is a bit faster, but cudahalf (FP16) seems to give problems at the moment for some pytorch versions so this code only runs at FP32 (a bit slower).
+## How to Evaluate mIoU
 
+Run `eval_iou.py` to evaluate semantic segmentation performance on Cityscapes:
 
+```bash
+python eval_iou.py --datadir /path/to/cityscapes/ --subset val
+```
 
+The script reports:
+- **Per-class IoU**: Intersection-over-Union for each of the 19 Cityscapes classes
+- **Mean IoU (mIoU)**: Average IoU across all classes
+
+## Temperature
+
+Temperature scaling improves calibration by adjusting softmax sharpness: `logits_scaled = logits / temperature`
+
+**PRO TIP**: Save logits once and test multiple temperatures offline to avoid re-running inference.
+
+### Step 1: Save Logits
+
+```bash
+python temperature/save_logits.py \
+  --input "datasets/RoadAnomaly21/images/*.png" \
+  --output_dir ./saved_logits
+```
+
+### Step 2: Test Temperatures
+
+```bash
+python temperature/test_temperatures_fast.py \
+  --logits_dir ./saved_logits/RoadAnomaly21 \
+  --method msp \
+  --temp_range "0.5,0.75,1.0,1.1,1.5,2.0,2.5,3.0,5.0,10.0"
+```
+
+### Temperature Scaling
+
+- **T < 1**: Sharper distribution (more confident predictions)
+- **T = 1**: No scaling (default)
+- **T > 1**: Smoother distribution (less confident predictions)
+
+The script evaluates each temperature value and reports the best AuPRC and FPR@95.
