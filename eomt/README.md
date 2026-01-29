@@ -85,15 +85,24 @@ Fine-tuning is configuration-driven and implemented using **PyTorch Lightning**.
    - Cityscapes dataset directory
    - Pretrained EoMT checkpoint
 
-3. **Run fine-tuning**:
+3. **Run fine-tuning on colab**:
 
 ```bash
 cd eomt
 
-python main.py fit \
-  -c "configs/dinov2/cityscapes/semantic/logit_norm_ablation/stageA.yaml" \
-  --data.init_args.path "/path/to/cityscapes" \
-  --model.init_args.ckpt_path "/path/to/eomt_cityscapes.bin"
+  ！python main.py fit \
+  --config configs/dinov2/cityscapes/semantic/stageA.yaml \
+  --model.init_args.ckpt_path "{model_path}" \
+  --data.init_args.path "{data_path}" \
+  --model.init_args.load_ckpt_class_head=false \
+  --trainer.max_epochs=20 \
+  --trainer.accumulate_grad_batches=16 \
+  --trainer.num_sanity_val_steps=0 \
+  --trainer.check_val_every_n_epoch=1 \
+  --data.init_args.batch_size=8 \
+  --data.init_args.num_workers=8 \
+  --compile_disabled
+
 ```
 
 ## PyTorch Lightning Changes for Fine-tuning Steps

@@ -16,10 +16,7 @@ The evaluation pipeline consists of:
 The script loads ERFNet checkpoints from the `trained_models/` folder by default:
 
 ```bash
-python evalAnomaly.py \
-  --input "datasets/RoadAnomaly21/images/*.png" \
-  --loadDir ../trained_models/ \
-  --loadWeights erfnet_pretrained.pth
+  python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth
 ```
 
 ## Evaluation Datasets
@@ -36,10 +33,10 @@ Supported datasets:
 Run `evalAnomaly.py` to compute anomaly detection metrics:
 
 ```bash
-# MSP (default)
-python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png"
+# MSP
+python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --anomaly_score msp
 
-# Max Logit
+# Max Logit 
 python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --anomaly_score max_logit
 
 # Max Entropy
@@ -65,7 +62,7 @@ Dataset: RoadAnomaly21 | Method: msp | AuPRC: XX.XX | FPR95: XX.XX
 Run `eval_iou.py` to evaluate semantic segmentation performance on Cityscapes:
 
 ```bash
-python eval_iou.py --datadir /path/to/cityscapes/ --subset val
+python eval_iou.py --datadir /path/to/cityscapes --subset val --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth --results-file results.txt
 ```
 
 The script reports:
@@ -81,18 +78,13 @@ Temperature scaling improves calibration by adjusting softmax sharpness: `logits
 ### Step 1: Save Logits
 
 ```bash
-python temperature/save_logits.py \
-  --input "datasets/RoadAnomaly21/images/*.png" \
-  --output_dir ./saved_logits
+python temperature/save_logits.py --input "datasets/RoadAnomaly21/images/*.png" --output_dir ./saved_logits
 ```
 
 ### Step 2: Test Temperatures
 
 ```bash
-python temperature/test_temperatures_fast.py \
-  --logits_dir ./saved_logits/RoadAnomaly21 \
-  --method msp \
-  --temp_range "0.5,0.75,1.0,1.1,1.5,2.0,2.5,3.0,5.0,10.0"
+python temperature/test_temperatures_fast.py --logits_file ./saved_logits/RoadAnomaly21_logits.pkl --method msp --temperatures 0.5 0.75 1.0 1.1 1.5 2.0 2.5 3.0 5.0 10.0
 ```
 
 ### Temperature Scaling

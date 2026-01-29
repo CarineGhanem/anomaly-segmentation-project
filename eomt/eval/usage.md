@@ -19,11 +19,7 @@ The script supports two checkpoint loading methods:
 
 2. **Local checkpoint**: Provide `--ckpt_path` with the path to your local checkpoint file:
    ```bash
-   python eval/extract_logits.py \
-     --input "datasets/RoadAnomaly21/images/*.png" \
-     --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" \
-     --ckpt_path ./checkpoints/eomt_cityscapes.bin \
-     --save_dir ./saved_logits
+     python eval/extract_logits.py --input "datasets/RoadAnomaly21/images/*.png" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path ./checkpoints/eomt_cityscapes.bin --save_dir ./saved_logits
    ```
 
 The script supports both PyTorch Lightning checkpoints (containing `state_dict` key) and raw PyTorch state dictionaries.
@@ -44,11 +40,7 @@ Supported datasets:
 Run `extract_logits.py` to process images and save per-pixel logit vectors as `.npz` files:
 
 ```bash
-python eval/extract_logits.py \
-  --input "datasets/RoadAnomaly21/images/*.png" \
-  --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" \
-  --ckpt_path "./checkpoints/eomt_cityscapes.bin" \
-  --save_dir ./saved_logits
+  python eval/extract_logits.py --input "datasets/RoadAnomaly21/images/*.png" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path "./checkpoints/eomt_cityscapes.bin" --save_dir ./saved_logits
 ```
 
 ## How to Evaluate Logits
@@ -74,12 +66,7 @@ Metrics reported:
 Run `eval_iou_eomt.py` to evaluate semantic segmentation performance (mean Intersection-over-Union) on Cityscapes dataset:
 
 ```bash
-python eval/eval_iou_eomt.py \
-  --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" \
-  --ckpt_path "./checkpoints/eomt_cityscapes.bin" \
-  --datadir /path/to/cityscapes \
-  --subset val \
-  --results-file results.txt
+  python eval/eval_iou_eomt.py --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path "./checkpoints/eomt_cityscapes.bin" --datadir /path/to/cityscapes --subset "val" --results-file results.txt
 ```
 
 The script reports:
@@ -94,9 +81,7 @@ The `find_optimal_temperature.py` script searches for the optimal temperature sc
 ### Usage
 
 ```bash
-python eval/find_optimal_temperature.py \
-  --logits_dir ./saved_logits/RoadAnomaly21 \
-  --temp_range "0.5,0.75,1.0,1.1,1.5,2.0,2.5,3.0,5.0,10.0"
+  python eval/find_optimal_temperature.py --logits_dir ./saved_logits/RoadAnomaly21 --temp_range "0.5,0.75,1.0,1.1,1.5,2.0,2.5,3.0,5.0,10.0"
 ```
 
 ### Temperature Scaling
