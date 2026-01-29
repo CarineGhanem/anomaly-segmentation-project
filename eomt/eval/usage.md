@@ -19,7 +19,7 @@ The script supports two checkpoint loading methods:
 
 2. **Local checkpoint**: Provide `--ckpt_path` with the path to your local checkpoint file:
    ```bash
-     python eval/extract_logits.py --input "datasets/RoadAnomaly21/images/*.png" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path ./checkpoints/eomt_cityscapes.bin --save_dir ./saved_logits
+     extract_logits.py --input "Validation_Dataset\RoadAnomaly21\images\*.png" --config "../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --save_dir ./saved_logits --ckpt_path ".\eomt_cityscapes.bin"
    ```
 
 The script supports both PyTorch Lightning checkpoints (containing `state_dict` key) and raw PyTorch state dictionaries.
@@ -40,7 +40,7 @@ Supported datasets:
 Run `extract_logits.py` to process images and save per-pixel logit vectors as `.npz` files:
 
 ```bash
-  python eval/extract_logits.py --input "datasets/RoadAnomaly21/images/*.png" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path "./checkpoints/eomt_cityscapes.bin" --save_dir ./saved_logits
+  extract_logits.py --input "Validation_Dataset\RoadAnomaly21\images\*.png" --config "../configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --save_dir ./saved_logits --ckpt_path ".\eomt_cityscapes.bin"
 ```
 
 ## How to Evaluate Logits
@@ -48,7 +48,7 @@ Run `extract_logits.py` to process images and save per-pixel logit vectors as `.
 Run `evaluate_logits.py` to compute anomaly detection metrics from saved logit files:
 
 ```bash
-python eval/evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly21
+evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly21
 ```
 
 The script evaluates multiple post-hoc anomaly scores:
@@ -66,7 +66,9 @@ Metrics reported:
 Run `eval_iou_eomt.py` to evaluate semantic segmentation performance (mean Intersection-over-Union) on Cityscapes dataset:
 
 ```bash
-  python eval/eval_iou_eomt.py --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path "./checkpoints/eomt_cityscapes.bin" --datadir /path/to/cityscapes --subset "val" --results-file results.txt
+cd anomaly-segmentation-project/eomt/eval
+
+eval/eval_iou_eomt.py --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path "./checkpoints/eomt_cityscapes.bin" --datadir /path/to/cityscapes --subset val --results-file results.txt
 ```
 
 The script reports:
@@ -81,7 +83,9 @@ The `find_optimal_temperature.py` script searches for the optimal temperature sc
 ### Usage
 
 ```bash
-  python eval/find_optimal_temperature.py --logits_dir ./saved_logits/RoadAnomaly21 --temp_range "0.5,0.75,1.0,1.1,1.5,2.0,2.5,3.0,5.0,10.0"
+  cd "anomaly-segmentation-project\eomt"
+
+  eval/find_optimal_temperature.py --logits_dir ./eval/saved_logits/RoadAnomaly21 --temp_range "0.5,0.75,1.0,1.1,1.5,2.0,2.5,3.0,5.0,10.0"
 ```
 
 ### Temperature Scaling

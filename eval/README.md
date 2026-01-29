@@ -11,13 +11,6 @@ The evaluation pipeline consists of:
 3. **`temperature/save_logits.py`**: Saves model logits for fast temperature scaling evaluation
 4. **`temperature/test_temperatures_fast.py`**: Tests different temperature values on saved logits
 
-## How to Load Checkpoints
-
-The script loads ERFNet checkpoints from the `trained_models/` folder by default:
-
-```bash
-  python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth
-```
 
 ## Evaluation Datasets
 
@@ -34,13 +27,15 @@ Run `evalAnomaly.py` to compute anomaly detection metrics:
 
 ```bash
 # MSP
-python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --anomaly_score msp
+evalAnomaly.py --input "Validation_Dataset\RoadAnomaly21\images\*.png" --anomaly_score msp --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth
 
 # Max Logit 
-python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --anomaly_score max_logit
+evalAnomaly.py --input "Validation_Dataset\RoadAnomaly21\images\*.png" --anomaly_score max_logit --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth
 
 # Max Entropy
-python evalAnomaly.py --input "datasets/RoadAnomaly21/images/*.png" --anomaly_score entropy
+evalAnomaly.py --input "Validation_Dataset\RoadAnomaly21\images\*.png" --anomaly_score entropy --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth
+
+
 ```
 
 The script evaluates post-hoc anomaly scores:
@@ -62,7 +57,9 @@ Dataset: RoadAnomaly21 | Method: msp | AuPRC: XX.XX | FPR95: XX.XX
 Run `eval_iou.py` to evaluate semantic segmentation performance on Cityscapes:
 
 ```bash
-python eval_iou.py --datadir /path/to/cityscapes --subset val --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth --results-file results.txt
+
+eval_iou.py --datadir /path/to/cityscapes --subset val --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth --results-file results.txt
+
 ```
 
 The script reports:
@@ -78,13 +75,17 @@ Temperature scaling improves calibration by adjusting softmax sharpness: `logits
 ### Step 1: Save Logits
 
 ```bash
-python temperature/save_logits.py --input "datasets/RoadAnomaly21/images/*.png" --output_dir ./saved_logits
+
+temperature/save_logits.py --input "Validation_Dataset\RoadAnomaly21\images\*.png" --output_dir ./saved_logits --loadDir ../trained_models/ --loadWeights erfnet_pretrained.pth
+
 ```
 
 ### Step 2: Test Temperatures
 
 ```bash
-python temperature/test_temperatures_fast.py --logits_file ./saved_logits/RoadAnomaly21_logits.pkl --method msp --temperatures 0.5 0.75 1.0 1.1 1.5 2.0 2.5 3.0 5.0 10.0
+
+temperature/test_temperatures_fast.py --logits_file ./saved_logits/RoadAnomaly21_logits.pkl --method msp --temperatures 0.5 0.75 1.0 1.1 1.5 2.0 2.5 3.0 5.0 10.0
+
 ```
 
 ### Temperature Scaling
