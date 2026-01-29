@@ -3,7 +3,7 @@
 This repository contains our implementation of anomaly segmentation using the Encoder-only Mask Transformer (EoMT) with logit normalization and magnitude-aware regularization.
 
 
-**Checkpoints and Datasets**: Pre-trained models, evaluation datasets, and results are available in our [shared drive folder](https://drive.google.com/drive/folders/YOUR_DRIVE_FOLDER_ID).
+**Checkpoints and Datasets**: Pre-trained models, evaluation datasets, and results are available in our [shared drive folder](https://drive.google.com/drive/folders/1Lc8KCF1ZsfYe7m7tjXIOicdymhETFsS1?usp=sharing).
 
 ## `eomt/eval`
 
@@ -172,16 +172,3 @@ Where:
 - **No LogitNorm** is applied - raw logits are used
 - Both semantic predictions and anomaly scores are computed from raw logits
 - This preserves magnitude information needed for confidence-based OoD detection
-
-## Evaluation Folder
-
-The `eval` folder contains scripts for evaluating anomaly segmentation performance. See [`eval/usage.md`](eval/usage.md) for detailed documentation on:
-
-- How to load checkpoints
-- Links to evaluation datasets
-- How to store logits
-- How to evaluate logits
-- How to evaluate mIoU
-- Temperature scaling for calibration
-
-The evaluation pipeline enables offline evaluation of saved logits without re-running inference, making it efficient to compare different models and training configurations.

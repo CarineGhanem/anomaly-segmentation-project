@@ -30,13 +30,7 @@ The script supports both PyTorch Lightning checkpoints (containing `state_dict` 
 
 ## Evaluation Datasets
 
-Evaluation datasets can be downloaded from:
-
-- [SegmentMeIfYouCan](https://segmentmeifyoucan.com/) - RoadAnomaly21 and RoadObstacle21
-- [Fishyscapes](https://fishyscapes.com/) - Lost & Found and Static benchmarks
-- [Road Anomaly Dataset](https://github.com/foolwood/RoadAnomaly) - Original Road Anomaly dataset
-
-**Note**: For convenience, checkpoints, datasets, and results are also available in our [shared drive folder](https://drive.google.com/drive/folders/YOUR_DRIVE_FOLDER_ID).
+ checkpoints, datasets, and results are also available in our [shared drive folder](https://drive.google.com/drive/folders/1Lc8KCF1ZsfYe7m7tjXIOicdymhETFsS1?usp=sharing).
 
 Supported datasets:
 - **RoadAnomaly21**: Real street scenes with diverse anomalies
@@ -53,7 +47,7 @@ Run `extract_logits.py` to process images and save per-pixel logit vectors as `.
 python eval/extract_logits.py \
   --input "datasets/RoadAnomaly21/images/*.png" \
   --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" \
-  --ckpt_path ./checkpoints/eomt_cityscapes.bin \
+  --ckpt_path "./checkpoints/eomt_cityscapes.bin" \
   --save_dir ./saved_logits
 ```
 
@@ -82,7 +76,7 @@ Run `eval_iou_eomt.py` to evaluate semantic segmentation performance (mean Inter
 ```bash
 python eval/eval_iou_eomt.py \
   --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" \
-  --ckpt_path ./checkpoints/eomt_cityscapes.bin \
+  --ckpt_path "./checkpoints/eomt_cityscapes.bin" \
   --datadir /path/to/cityscapes \
   --subset val \
   --results-file results.txt
@@ -115,26 +109,3 @@ Temperature scaling applies: `logits_scaled = logits / temperature`
 
 The script evaluates each temperature value and reports the one with the best AUPRC and FPR@95.
 
-## Complete Workflow Example
-
-```bash
-# 1. Extract logits for all datasets
-python eval/extract_logits.py --input "datasets/RoadAnomaly21/images/*.png" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path ./checkpoints/eomt_cityscapes.bin --save_dir ./saved_logits
-python eval/extract_logits.py --input "datasets/RoadObsticle21/images/*.webp" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path ./checkpoints/eomt_cityscapes.bin --save_dir ./saved_logits
-python eval/extract_logits.py --input "datasets/FS_LostFound_full/images/*.png" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path ./checkpoints/eomt_cityscapes.bin --save_dir ./saved_logits
-python eval/extract_logits.py --input "datasets/fs_static/images/*.jpg" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path ./checkpoints/eomt_cityscapes.bin --save_dir ./saved_logits
-python eval/extract_logits.py --input "datasets/RoadAnomaly/images/*.jpg" --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path ./checkpoints/eomt_cityscapes.bin --save_dir ./saved_logits
-
-# 2. Evaluate logits
-python eval/evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly21
-python eval/evaluate_logits.py --logits_dir ./saved_logits/RoadObsticle21
-python eval/evaluate_logits.py --logits_dir ./saved_logits/FS_LostFound_full
-python eval/evaluate_logits.py --logits_dir ./saved_logits/fs_static
-python eval/evaluate_logits.py --logits_dir ./saved_logits/RoadAnomaly
-
-# 3. Evaluate mIoU
-python eval/eval_iou_eomt.py --config "configs/dinov2/cityscapes/semantic/eomt_base_640.yaml" --ckpt_path ./checkpoints/eomt_cityscapes.bin --datadir /path/to/cityscapes --subset val
-
-# 4. Find optimal temperature (optional)
-python eval/find_optimal_temperature.py --logits_dir ./saved_logits/RoadAnomaly21 --temp_range "0.5,0.75,1.0,1.1,1.5,2.0"
-```

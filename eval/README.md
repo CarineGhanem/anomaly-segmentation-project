@@ -24,13 +24,6 @@ python evalAnomaly.py \
 
 ## Evaluation Datasets
 
-Evaluation datasets can be downloaded from:
-
-- [SegmentMeIfYouCan](https://segmentmeifyoucan.com/) - RoadAnomaly21 and RoadObstacle21
-- [Fishyscapes](https://fishyscapes.com/) - Lost & Found and Static benchmarks
-- [Road Anomaly Dataset](https://github.com/foolwood/RoadAnomaly) - Original Road Anomaly dataset
-- [Combined validation datasets](https://drive.google.com/file/d/1r2eFANvSlcUjxcerjC8l6dRa0slowMpx/view)
-
 Supported datasets:
 - **RoadAnomaly21**: Real street scenes with diverse anomalies
 - **RoadObstacle21**: Road-obstacle scenes where anomalies lie on the roadway
