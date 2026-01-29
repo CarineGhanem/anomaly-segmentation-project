@@ -587,15 +587,6 @@ class MaskClassificationLoss(nn.Module):
             total_loss += weighted_loss
             log_fn(key, value, on_step=True, prog_bar=True)
         
-        # ADD THIS BLOCK - Log magnitude stats
-        if self.use_magnitude_loss and self.magnitude_loss_type == "margin":
-            log_fn("matched_mag", self._last_matched_mag, 
-                on_step=True, prog_bar=True)
-            log_fn("unmatched_mag", self._last_unmatched_mag, 
-                on_step=True, prog_bar=True)
-            mag_diff = self._last_matched_mag - self._last_unmatched_mag
-            log_fn("mag_diff", mag_diff, on_step=True, prog_bar=True)
-        
         log_fn("loss_total", total_loss, on_step=True, prog_bar=True)
         
         return total_loss
