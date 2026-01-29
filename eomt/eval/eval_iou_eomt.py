@@ -182,7 +182,7 @@ def main():
     parser.add_argument("--ckpt_path", type=str, default=None,
                         help="Local path to checkpoint file (if not on HuggingFace). If not provided, will try to download from HuggingFace.")
     parser.add_argument("--datadir", type=str,
-                        default="E:\\advanced machine learning\\project-kevser")
+                        help="Path to Cityscapes dataset directory.")
     parser.add_argument("--subset", type=str, default="val")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=1)
